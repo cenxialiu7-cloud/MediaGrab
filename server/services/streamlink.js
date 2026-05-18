@@ -226,7 +226,17 @@ export function recordStream(task) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// yt-dlp recorder — best for YouTube/Facebook/TikTok live + --live-from-start
+// yt-dlp recorder — best for YouTube/Facebook/TikTok live
+//
+// Format selector strategy (after debugging YouTube live "format not available"):
+//   - For YouTube Live, formats are HLS-muxed (video+audio in one segment).
+//     `-f best` works fine; `bv*+ba/b` is the safety fallback for streams that
+//     only expose separated tracks.
+//   - `--live-from-start` is EXPERIMENTAL and only works on DASH streams.
+//     Enabling it on HLS-only streams (like most YouTube lives) causes
+//     "ERROR: Requested format is not available". We default to OFF and let
+//     the caller opt-in via task.liveFromStart=true.
+//   - `--hls-use-mpegts` keeps the file appendable & crash-safe.
 // ────────────────────────────────────────────────────────────────────────────
 export function recordWithYtdlp(task) {
   const { tsPath, mp4Path } = prepareOutput(task, 'ts');
@@ -236,14 +246,21 @@ export function recordWithYtdlp(task) {
     '--no-part',                           // write directly (so file is readable while recording)
     '--no-mtime',
     '--hls-use-mpegts',                    // use MPEG-TS instead of fragmented MP4
-    '--live-from-start',                   // record from beginning of live
     '--retries', 'infinite',
     '--fragment-retries', 'infinite',
     '--retry-sleep', 'linear=1::5',        // 1s → 5s exponential backoff
-    '-f', 'best',
+    // Robust format selector — try muxed best first, then separated streams,
+    // then ANY combination, then any single format. Works across YouTube/FB/IG.
+    '-f', 'best/bv*+ba/bv*/b',
     '-o', tsPath,
     task.url,
   ];
+
+  // Opt-in: only enable --live-from-start when the caller explicitly asks AND
+  // we believe the source supports DASH (most don't for live in 2026)
+  if (task.liveFromStart === true) {
+    args.unshift('--live-from-start');
+  }
 
   if (task.duration) {
     args.push('--download-sections', `*0-${task.duration}`);
