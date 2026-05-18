@@ -81,6 +81,10 @@ jobs:
 
       - name: Install production deps into payload
         working-directory: packaging-windows/payload/app
+        env:
+          # Don't let `npm install` auto-download Chromium to the default cache;
+          # we'll do that explicitly into the payload directory in a later step.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm install --omit=dev --omit=optional --no-audit --no-fund --no-package-lock
 
       # ────────────────────────────────────────────────────────────────────
@@ -122,7 +126,26 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\packaging-windows\payload\ms-playwright
         run: |
           cd packaging-windows\payload\app
-          npx --yes playwright@1.48.0 install --only-shell chromium
+          # Use the playwright that was installed alongside production deps.
+          # node_modules\playwright\cli.js is the canonical entry point and
+          # uses whatever version package.json resolved to (currently >= 1.49,
+          # which supports --only-shell). Fall back to full chromium if needed.
+          $cli = "node_modules\playwright\cli.js"
+          if (-not (Test-Path $cli)) {
+            $cli = "node_modules\playwright-core\cli.js"
+          }
+          Write-Host "Using Playwright CLI at: $cli"
+          node $cli --version
+          # Try --only-shell first (smaller); fall back to full chromium if older version
+          $result = & node $cli install --only-shell chromium 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "--only-shell unsupported; installing full chromium"
+            $result | Write-Host
+            node $cli install chromium
+            if ($LASTEXITCODE -ne 0) { throw "Playwright install failed" }
+          } else {
+            $result | Write-Host
+          }
           Get-ChildItem $env:PLAYWRIGHT_BROWSERS_PATH | Select-Object Name, @{N='Size(MB)';E={[math]::Round((Get-ChildItem $_.FullName -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)}}
 
       # ────────────────────────────────────────────────────────────────────
