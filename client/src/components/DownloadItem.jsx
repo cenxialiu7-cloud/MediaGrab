@@ -28,6 +28,12 @@ export default function DownloadItem({ task }) {
 
   const handleAction = async (action) => {
     try {
+      // For live recordings, "cancel" should send a graceful stop (SIGINT)
+      // so the .ts file is flushed and remuxed to .mp4 properly.
+      if (action === 'cancel' && task.type === 'live') {
+        await fetch(`/api/live/stop/${task.id}`, { method: 'POST' });
+        return;
+      }
       await fetch(`/api/download/${action}/${task.id}`, { method: 'POST' });
     } catch {}
   };

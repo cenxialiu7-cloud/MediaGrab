@@ -96,7 +96,7 @@ export default function App() {
           </div>
         )}
         {activeTab === 'series' && <SeriesSelector onSwitchTab={setActiveTab} />}
-        {activeTab === 'live' && <LiveRecorder />}
+        {activeTab === 'live' && <LiveRecorder onSwitchTab={setActiveTab} />}
         {activeTab === 'settings' && <Settings deps={deps} />}
       </main>
     </div>

@@ -2,8 +2,28 @@ import { Router } from 'express';
 import * as playwright from '../services/playwright.js';
 import * as flaresolverr from '../services/flaresolverr.js';
 import * as ytdlp from '../services/ytdlp.js';
+import { probeUrl } from '../services/probe.js';
 
 const router = Router();
+
+/**
+ * POST /api/parse/probe — universal URL classifier.
+ * Returns:
+ *   { kind, title, isLive, liveStatus, entries[], recommendedAction, recorder, ... }
+ * Frontend uses this to decide which UI to show without needing the user to know
+ * which tab to use.
+ */
+router.post('/probe', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    const result = await probeUrl(url);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // List videos in a YouTube playlist or channel
 router.post('/youtube-list', async (req, res) => {
