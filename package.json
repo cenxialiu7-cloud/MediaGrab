@@ -1,0 +1,28 @@
+{
+  "name": "mediagrab",
+  "version": "1.0.0",
+  "description": "Cross-platform video downloader with browser UI",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node server/index.js",
+    "client": "cd client && npx vite --host",
+    "build": "cd client && npx vite build",
+    "start": "NODE_ENV=production node server/index.js",
+    "install:deps": "npm install && cd client && npm install"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "cors": "^2.8.5",
+    "uuid": "^10.0.0",
+    "playwright": "^1.48.0",
+    "open": "^10.1.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "which": "^4.0.0"
+  }
+}

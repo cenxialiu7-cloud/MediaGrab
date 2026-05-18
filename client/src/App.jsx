@@ -1,0 +1,104 @@
+import React, { useState, useEffect } from 'react';
+import { useWebSocket } from './hooks/useWebSocket';
+import UrlInput from './components/UrlInput';
+import DownloadQueue from './components/DownloadQueue';
+import SeriesSelector from './components/SeriesSelector';
+import LiveRecorder from './components/LiveRecorder';
+import Settings from './components/Settings';
+import DepsCheck from './components/DepsCheck';
+
+const TABS = [
+  { id: 'download', label: '下載 Download', icon: '📥' },
+  { id: 'series', label: '劇集 / 清單解析 Series & Playlist', icon: '📺' },
+  { id: 'live', label: '直播錄製 Live Recording', icon: '🔴' },
+  { id: 'settings', label: '設定 Settings', icon: '⚙️' },
+];
+
+export default function App() {
+  const { tasks, connected } = useWebSocket();
+  const [activeTab, setActiveTab] = useState('download');
+  const [deps, setDeps] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/settings/dependencies')
+      .then(r => r.json())
+      .then(setDeps)
+      .catch(() => {});
+  }, []);
+
+  const activeTasks = tasks.filter(t => t.status === 'downloading' || t.status === 'merging');
+  const globalSpeed = activeTasks.reduce((sum, t) => {
+    const match = (t.speed || '').match(/([\d.]+)\s*(MB|KB|GB|B)/i);
+    if (!match) return sum;
+    const val = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+    if (unit === 'GB') return sum + val * 1024;
+    if (unit === 'MB') return sum + val;
+    if (unit === 'KB') return sum + val / 1024;
+    return sum + val / 1048576;
+  }, 0);
+
+  return (
+    <div className="min-h-screen bg-dark-900 text-white">
+      <header className="bg-dark-800 border-b border-dark-600 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">📥</span>
+            <div>
+              <h1 className="text-xl font-bold">MediaGrab</h1>
+              <p className="text-xs text-dark-200">通用影音下載器 · Universal Video Downloader</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-dark-200">
+              {activeTasks.length > 0 && (
+                <span className="text-accent">
+                  ↓ {globalSpeed.toFixed(1)} MB/s
+                </span>
+              )}
+              <span className="mx-2">|</span>
+              <span>進行中 Active: {activeTasks.length}</span>
+              <span className="mx-2">|</span>
+              <span>等待中 Queue: {tasks.filter(t => t.status === 'queued').length}</span>
+            </div>
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
+              title={connected ? '已連線 Connected' : '已斷線 Disconnected'} />
+          </div>
+        </div>
+      </header>
+
+      <nav className="bg-dark-800 border-b border-dark-700">
+        <div className="max-w-6xl mx-auto flex">
+          {TABS.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
+                activeTab === tab.id
+                  ? 'border-accent text-accent'
+                  : 'border-transparent text-dark-200 hover:text-white hover:border-dark-400'
+              }`}
+            >
+              <span className="mr-2">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {deps && !deps['yt-dlp'] && activeTab !== 'settings' && <DepsCheck deps={deps} />}
+
+      <main className="max-w-6xl mx-auto p-6">
+        {activeTab === 'download' && (
+          <div className="space-y-6">
+            <UrlInput />
+            <DownloadQueue tasks={tasks} />
+          </div>
+        )}
+        {activeTab === 'series' && <SeriesSelector onSwitchTab={setActiveTab} />}
+        {activeTab === 'live' && <LiveRecorder />}
+        {activeTab === 'settings' && <Settings deps={deps} />}
+      </main>
+    </div>
+  );
+}

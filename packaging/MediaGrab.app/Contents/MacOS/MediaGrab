@@ -1,0 +1,58 @@
+#!/bin/bash
+# MediaGrab Launcher — bundled .app version
+# Uses portable Node.js + bundled binaries; no Homebrew or Python required.
+
+set -e
+
+# Resolve the .app bundle's Resources directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_ROOT="$(dirname "$SCRIPT_DIR")"
+RESOURCES="$APP_ROOT/Resources"
+
+NODE_BIN="$RESOURCES/node/bin/node"
+APP_DIR="$RESOURCES/app"
+VENDOR_BIN="$RESOURCES/bin"
+
+# Per-user data location (writable; the .app itself lives in /Applications and is read-only)
+USER_DATA="$HOME/Library/Application Support/MediaGrab"
+mkdir -p "$USER_DATA"
+LOG_FILE="$USER_DATA/server.log"
+
+# Make bundled binaries discoverable to child processes (spawned yt-dlp, ffmpeg)
+export PATH="$VENDOR_BIN:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# Point Playwright to bundled browser
+export PLAYWRIGHT_BROWSERS_PATH="$RESOURCES/ms-playwright"
+
+export NODE_ENV=production
+PORT=${PORT:-9800}
+export PORT
+
+# If a previous instance is already running, just open the browser to it
+if lsof -ti tcp:$PORT >/dev/null 2>&1; then
+  open "http://localhost:$PORT"
+  exit 0
+fi
+
+# Start the server, with logs going to ~/Library/Application Support/MediaGrab/server.log
+cd "$APP_DIR"
+"$NODE_BIN" server/index.js >>"$LOG_FILE" 2>&1 &
+SERVER_PID=$!
+echo $SERVER_PID > "$USER_DATA/server.pid"
+
+# Wait until the server responds (up to ~15 seconds), then open browser
+for i in $(seq 1 30); do
+  if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/api/status" 2>/dev/null | grep -q "200"; then
+    open "http://localhost:$PORT"
+    exit 0
+  fi
+  sleep 0.5
+done
+
+# Fallback: open anyway
+open "http://localhost:$PORT"
+
+# Show a friendly alert if the server didn't come up
+if ! curl -s -o /dev/null "http://localhost:$PORT/api/status" 2>/dev/null; then
+  osascript -e 'display alert "MediaGrab" message "啟動失敗，請查看 ~/Library/Application Support/MediaGrab/server.log" as critical' 2>/dev/null
+fi

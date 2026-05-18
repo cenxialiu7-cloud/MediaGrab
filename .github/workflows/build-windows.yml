@@ -1,0 +1,217 @@
+name: Build Windows Installer
+
+on:
+  # Manual run from the GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.0.0)'
+        required: true
+        default: '1.0.0'
+  # Auto-run on version tags like v1.0.0
+  push:
+    tags: ['v*']
+
+env:
+  NODE_VERSION:           '20'
+  PORTABLE_NODE_VERSION:  '20.18.0'
+  YT_DLP_URL:    'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+  FFMPEG_URL:    'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      # ────────────────────────────────────────────────────────────────────
+      # 1. Checkout & figure out version string
+      # ────────────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve build version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}"
+          if (-not $v) {
+            if ($env:GITHUB_REF -like 'refs/tags/v*') {
+              $v = $env:GITHUB_REF -replace '^refs/tags/v',''
+            } else {
+              $v = '1.0.0'
+            }
+          }
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "Build version: $v"
+
+      # ────────────────────────────────────────────────────────────────────
+      # 2. Build the React client and install production deps
+      # ────────────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install root deps
+        run: npm install --no-audit --no-fund
+
+      - name: Build React client
+        working-directory: client
+        run: |
+          npm install --no-audit --no-fund
+          npx vite build
+
+      # ────────────────────────────────────────────────────────────────────
+      # 3. Prepare payload directory layout
+      # ────────────────────────────────────────────────────────────────────
+      - name: Create payload structure
+        shell: pwsh
+        run: |
+          $payload = "packaging-windows\payload"
+          New-Item -ItemType Directory -Force -Path $payload, "$payload\app", "$payload\app\server", "$payload\app\client\dist", "$payload\node", "$payload\bin", "$payload\ms-playwright" | Out-Null
+
+      - name: Copy app source to payload
+        shell: pwsh
+        run: |
+          Copy-Item -Recurse -Force server\*        packaging-windows\payload\app\server\
+          Copy-Item -Recurse -Force client\dist\*   packaging-windows\payload\app\client\dist\
+          Copy-Item -Force package.json             packaging-windows\payload\app\
+          if (Test-Path package-lock.json) { Copy-Item -Force package-lock.json packaging-windows\payload\app\ }
+
+      - name: Install production deps into payload
+        working-directory: packaging-windows/payload/app
+        run: npm install --omit=dev --omit=optional --no-audit --no-fund --no-package-lock
+
+      # ────────────────────────────────────────────────────────────────────
+      # 4. Download portable Node.js + tool binaries
+      # ────────────────────────────────────────────────────────────────────
+      - name: Download portable Node.js
+        shell: pwsh
+        run: |
+          $url = "https://nodejs.org/dist/v${env:PORTABLE_NODE_VERSION}/node-v${env:PORTABLE_NODE_VERSION}-win-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile node.zip
+          Expand-Archive node.zip -DestinationPath node-extract
+          Copy-Item -Recurse -Force "node-extract\node-v${env:PORTABLE_NODE_VERSION}-win-x64\*" packaging-windows\payload\node\
+          Remove-Item -Recurse -Force node-extract, node.zip
+          packaging-windows\payload\node\node.exe --version
+
+      - name: Download yt-dlp.exe
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "$env:YT_DLP_URL" -OutFile packaging-windows\payload\bin\yt-dlp.exe
+          (Get-Item packaging-windows\payload\bin\yt-dlp.exe).Length / 1MB
+
+      - name: Download ffmpeg (static, win64)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "$env:FFMPEG_URL" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-extract
+          $bin = Get-ChildItem -Recurse ffmpeg-extract -Filter "ffmpeg.exe" | Select-Object -First 1
+          $binDir = $bin.Directory.FullName
+          Copy-Item "$binDir\ffmpeg.exe"  packaging-windows\payload\bin\
+          Copy-Item "$binDir\ffprobe.exe" packaging-windows\payload\bin\
+          Remove-Item -Recurse -Force ffmpeg-extract, ffmpeg.zip
+
+      # ────────────────────────────────────────────────────────────────────
+      # 5. Install Playwright Chromium headless shell into payload
+      # ────────────────────────────────────────────────────────────────────
+      - name: Install Playwright Chromium (headless shell only)
+        shell: pwsh
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\packaging-windows\payload\ms-playwright
+        run: |
+          cd packaging-windows\payload\app
+          npx --yes playwright@1.48.0 install --only-shell chromium
+          Get-ChildItem $env:PLAYWRIGHT_BROWSERS_PATH | Select-Object Name, @{N='Size(MB)';E={[math]::Round((Get-ChildItem $_.FullName -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)}}
+
+      # ────────────────────────────────────────────────────────────────────
+      # 6. Build the Go launcher (MediaGrab.exe)
+      # ────────────────────────────────────────────────────────────────────
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build launcher.exe
+        shell: pwsh
+        env:
+          GOOS:   windows
+          GOARCH: amd64
+        run: |
+          cd packaging-windows\launcher
+          go build -ldflags="-H windowsgui -s -w" -trimpath -o ..\payload\MediaGrab.exe main.go
+          (Get-Item ..\payload\MediaGrab.exe).Length / 1KB
+
+      # ────────────────────────────────────────────────────────────────────
+      # 7. Verify payload sizes before compiling installer
+      # ────────────────────────────────────────────────────────────────────
+      - name: Payload size report
+        shell: pwsh
+        run: |
+          Get-ChildItem packaging-windows\payload | ForEach-Object {
+            $size = if ($_.PSIsContainer) {
+              (Get-ChildItem $_.FullName -Recurse | Measure-Object -Property Length -Sum).Sum
+            } else { $_.Length }
+            "{0,-20} {1,10:N1} MB" -f $_.Name, ($size / 1MB)
+          }
+          $total = (Get-ChildItem packaging-windows\payload -Recurse | Measure-Object -Property Length -Sum).Sum
+          "{0,-20} {1,10:N1} MB" -f "TOTAL", ($total / 1MB)
+
+      # ────────────────────────────────────────────────────────────────────
+      # 8. Patch version in installer.iss and run Inno Setup
+      # ────────────────────────────────────────────────────────────────────
+      - name: Patch installer version
+        shell: pwsh
+        run: |
+          (Get-Content packaging-windows\installer.iss) `
+            -replace '#define MyAppVersion   "1.0.0"', "#define MyAppVersion   `"${{ steps.ver.outputs.version }}`"" `
+            | Set-Content packaging-windows\installer.iss
+
+      - name: Compile installer with Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            # Some runner images put Inno Setup elsewhere; install via chocolatey as fallback
+            choco install innosetup --confirm --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc packaging-windows\installer.iss
+
+      # ────────────────────────────────────────────────────────────────────
+      # 9. Upload the resulting .exe as an artifact + GitHub Release asset
+      # ────────────────────────────────────────────────────────────────────
+      - name: List output
+        shell: pwsh
+        run: |
+          Get-ChildItem packaging-windows\dist -Filter "*.exe" | ForEach-Object {
+            "{0,-50} {1,10:N1} MB" -f $_.Name, ($_.Length / 1MB)
+          }
+
+      - name: Upload installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Windows-Installer-${{ steps.ver.outputs.version }}
+          path: packaging-windows/dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach to GitHub Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging-windows/dist/*.exe
+          body: |
+            **MediaGrab ${{ steps.ver.outputs.version }} for Windows**
+
+            🪟 Windows 10 / 11 (x64) self-contained installer.
+            Contains Node.js, yt-dlp, ffmpeg, Playwright Chromium — no external dependencies needed.
+
+            **Installation:**
+            1. Download `MediaGrab-Setup-${{ steps.ver.outputs.version }}-win-x64.exe`
+            2. Double-click to install (may need to click "More info → Run anyway" on SmartScreen warning)
+            3. Launch from desktop or Start Menu
+            4. Browser opens automatically at http://localhost:9800
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
