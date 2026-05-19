@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import AdSlot from './AdSlot';
 
 /**
  * SmartInput — Unified URL input that auto-classifies via /api/parse/probe
@@ -19,7 +20,7 @@ import React, { useState } from 'react';
  *      - DirectStreamCard (raw .m3u8 — record/download)
  *      - UnknownCard     (couldn't classify — error + manual fallback hint)
  */
-export default function SmartInput({ onSwitchTab }) {
+export default function SmartInput({ onSwitchTab, disableAds = false }) {
   const [url, setUrl] = useState('');
   const [probing, setProbing] = useState(false);
   const [probe, setProbe] = useState(null);
@@ -136,6 +137,9 @@ export default function SmartInput({ onSwitchTab }) {
           </div>
         </div>
       )}
+
+      {/* Welcome-state ad slot — hidden if no zone configured or disableAds=true */}
+      {!probe && !probing && <AdSlot name="smart-welcome" disableAds={disableAds} />}
     </div>
   );
 }

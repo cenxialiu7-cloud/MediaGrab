@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import DownloadItem from './DownloadItem';
+import AdSlot from './AdSlot';
 
-export default function DownloadQueue({ tasks }) {
+export default function DownloadQueue({ tasks, disableAds = false }) {
   const [clearing, setClearing] = useState(false);
 
   const handleClearFinished = async () => {
@@ -15,10 +16,14 @@ export default function DownloadQueue({ tasks }) {
 
   if (!tasks || tasks.length === 0) {
     return (
-      <div className="bg-dark-800 rounded-xl p-12 border border-dark-600 text-center">
-        <div className="text-4xl mb-4">📭</div>
-        <p className="text-dark-300">尚無下載任務 · No downloads yet</p>
-        <p className="text-dark-400 text-sm mt-1">在上方貼上網址即可開始下載 · Paste a URL above to start</p>
+      <div className="space-y-4">
+        <div className="bg-dark-800 rounded-xl p-12 border border-dark-600 text-center">
+          <div className="text-4xl mb-4">📭</div>
+          <p className="text-dark-300">尚無下載任務 · No downloads yet</p>
+          <p className="text-dark-400 text-sm mt-1">在上方貼上網址即可開始下載 · Paste a URL above to start</p>
+        </div>
+        {/* Ad slot in empty-queue state — invisible unless ad zone configured */}
+        <AdSlot name="queue-empty" disableAds={disableAds} />
       </div>
     );
   }

@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
+import AdSlot from './AdSlot';
+import { VPN_OFFERS, SUPPORT_LINKS, withUtm } from '../monetization';
 
-export default function Settings({ deps }) {
-  const [settings, setSettings] = useState(null);
+export default function Settings({ deps, settings: parentSettings, onSettingsChange }) {
+  const [settings, setSettings] = useState(parentSettings || null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(setSettings)
-      .catch(() => {});
+    if (!settings) {
+      fetch('/api/settings')
+        .then(r => r.json())
+        .then(s => {
+          setSettings(s);
+          if (onSettingsChange) onSettingsChange(prev => ({ ...prev, ...s }));
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const handleSave = async () => {
@@ -20,8 +27,9 @@ export default function Settings({ deps }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
-      await res.json();
+      const updated = await res.json();
       setSaved(true);
+      if (onSettingsChange) onSettingsChange(prev => ({ ...prev, ...updated }));
       setTimeout(() => setSaved(false), 2000);
     } catch {} finally {
       setSaving(false);
@@ -29,6 +37,10 @@ export default function Settings({ deps }) {
   };
 
   if (!settings) return <div className="text-dark-300">載入設定中... · Loading settings...</div>;
+
+  // Filter VPN offers to only those with real URLs configured
+  const activeOffers = VPN_OFFERS.filter(o => o.url && o.url.trim().length > 0);
+  const hasSupport = SUPPORT_LINKS.kofi || activeOffers.length > 0;
 
   return (
     <div className="space-y-6">
@@ -80,6 +92,28 @@ export default function Settings({ deps }) {
               <option value="edge">Edge</option>
             </select>
           </div>
+
+          {/* Disable Ads toggle — important for ePrivacy compliance */}
+          <div className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
+            <div className="flex-1">
+              <div className="text-sm text-white">關閉廣告與贊助橫幅 · Disable ads &amp; sponsor banner</div>
+              <div className="text-xs text-dark-300 mt-0.5">
+                MediaGrab 完全免費。廣告與 VPN 贊助連結幫助維持開發，但你可以關閉它們。
+                <br />
+                <span className="opacity-70">MediaGrab is free. Ads &amp; affiliate links support development, but you can turn them off.</span>
+              </div>
+            </div>
+            <label className="ml-3 inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={!!settings.disableAds}
+                onChange={e => setSettings(s => ({ ...s, disableAds: e.target.checked }))}
+                className="sr-only peer"
+              />
+              <div className="relative w-11 h-6 bg-dark-500 peer-focus:ring-2 peer-focus:ring-accent rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-transform peer-checked:bg-accent"></div>
+            </label>
+          </div>
+
           <button
             onClick={handleSave}
             disabled={saving}
@@ -116,6 +150,65 @@ export default function Settings({ deps }) {
           ))}
         </div>
       </div>
+
+      {/* Support development section — only renders if at least one link is configured */}
+      {hasSupport && !settings.disableAds && (
+        <div className="bg-dark-800 rounded-xl p-6 border border-dark-600">
+          <h2 className="text-lg font-semibold mb-2">支持開發 · Support Development</h2>
+          <p className="text-sm text-dark-300 mb-4">
+            MediaGrab 永遠免費。以下連結幫助維持開發與伺服器成本，沒有任何強制。
+            <br />
+            <span className="text-dark-400">MediaGrab will always be free. These optional links help cover development &amp; server costs.</span>
+          </p>
+
+          <div className="space-y-3">
+            {SUPPORT_LINKS.kofi && (
+              <a
+                href={withUtm(SUPPORT_LINKS.kofi, { utm_content: 'settings' })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between p-3 bg-dark-700 hover:bg-dark-600 rounded-lg transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">☕</span>
+                  <div>
+                    <div className="text-sm font-medium">請開發者喝杯咖啡 · Buy me a coffee</div>
+                    <div className="text-xs text-dark-300">Ko-fi 一次性小額抖內 · One-time small tip</div>
+                  </div>
+                </div>
+                <span className="text-accent opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              </a>
+            )}
+
+            {activeOffers.map(offer => (
+              <a
+                key={offer.name}
+                href={withUtm(offer.url, { utm_content: 'settings' })}
+                target="_blank"
+                rel="noopener noreferrer sponsored"
+                className="flex items-center justify-between p-3 bg-dark-700 hover:bg-dark-600 rounded-lg transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🛡️</span>
+                  <div>
+                    <div className="text-sm font-medium">{offer.headline}</div>
+                    <div className="text-xs text-dark-300">{offer.name} — {offer.subtext}</div>
+                  </div>
+                </div>
+                <span className="text-accent text-xs opacity-0 group-hover:opacity-100 transition-opacity">聯盟連結 →</span>
+              </a>
+            ))}
+
+            <p className="text-xs text-dark-400 pt-2">
+              💡 透過上方連結購買 VPN 時，MediaGrab 會收到聯盟分潤，但不影響你的價格。
+              你也可以隨時在上方「關閉廣告」開關裡停用所有連結。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom ad slot — invisible without ad zone config */}
+      <AdSlot name="settings-bottom" disableAds={settings.disableAds} />
     </div>
   );
 }

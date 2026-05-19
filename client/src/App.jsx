@@ -7,6 +7,7 @@ import SeriesSelector from './components/SeriesSelector';
 import LiveRecorder from './components/LiveRecorder';
 import Settings from './components/Settings';
 import DepsCheck from './components/DepsCheck';
+import SponsorBar from './components/SponsorBar';
 
 const TABS = [
   { id: 'smart',    label: '智能 Smart',              icon: '✨' },
@@ -20,6 +21,8 @@ const TABS = [
 export default function App() {
   const { tasks, connected } = useWebSocket();
   const [activeTab, setActiveTab] = useState('smart');
+  const [deps, setDeps] = useState(null);
+  const [settings, setSettings] = useState({ disableAds: false });
 
   // Backwards-compat shim — old child components call onSwitchTab('download')
   // expecting the queue view; we now have 'queue' for that.
@@ -27,12 +30,17 @@ export default function App() {
     if (tabId === 'download') setActiveTab('queue');
     else setActiveTab(tabId);
   };
-  const [deps, setDeps] = useState(null);
 
   useEffect(() => {
     fetch('/api/settings/dependencies')
       .then(r => r.json())
       .then(setDeps)
+      .catch(() => {});
+
+    // Load user settings (including disableAds preference)
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(s => setSettings(prev => ({ ...prev, ...s })))
       .catch(() => {});
   }, []);
 
@@ -77,6 +85,9 @@ export default function App() {
         </div>
       </header>
 
+      {/* VPN affiliate banner — auto-hides if no offer URL is configured or user dismissed */}
+      <SponsorBar disableAds={settings.disableAds} />
+
       <nav className="bg-dark-800 border-b border-dark-700">
         <div className="max-w-6xl mx-auto flex">
           {TABS.map(tab => (
@@ -101,25 +112,27 @@ export default function App() {
       <main className="max-w-6xl mx-auto p-6">
         {activeTab === 'smart' && (
           <div className="space-y-6">
-            <SmartInput onSwitchTab={switchTab} />
+            <SmartInput onSwitchTab={switchTab} disableAds={settings.disableAds} />
             {/* Always show queue below smart input so user can see progress */}
             {tasks.length > 0 && <DownloadQueue tasks={tasks} />}
           </div>
         )}
         {activeTab === 'queue' && (
           <div className="space-y-6">
-            <DownloadQueue tasks={tasks} />
+            <DownloadQueue tasks={tasks} disableAds={settings.disableAds} />
           </div>
         )}
         {activeTab === 'download' && (
           <div className="space-y-6">
             <UrlInput />
-            <DownloadQueue tasks={tasks} />
+            <DownloadQueue tasks={tasks} disableAds={settings.disableAds} />
           </div>
         )}
         {activeTab === 'series' && <SeriesSelector onSwitchTab={switchTab} />}
         {activeTab === 'live' && <LiveRecorder onSwitchTab={switchTab} />}
-        {activeTab === 'settings' && <Settings deps={deps} />}
+        {activeTab === 'settings' && (
+          <Settings deps={deps} settings={settings} onSettingsChange={setSettings} />
+        )}
       </main>
     </div>
   );

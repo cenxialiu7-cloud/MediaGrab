@@ -16,6 +16,9 @@ const defaultSettings = {
   theme: 'dark',
   autoStartQueue: true,
   cookies: '',
+  // Monetization opt-out — hides SponsorBar, AdSlot, and donation links.
+  // Default false (= ads/affiliate visible) but user can flip in Settings.
+  disableAds: false,
 };
 
 function loadSettings() {
