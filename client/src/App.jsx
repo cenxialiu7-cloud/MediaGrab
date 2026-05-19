@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
+import SmartInput from './components/SmartInput';
 import UrlInput from './components/UrlInput';
 import DownloadQueue from './components/DownloadQueue';
 import SeriesSelector from './components/SeriesSelector';
@@ -8,15 +9,24 @@ import Settings from './components/Settings';
 import DepsCheck from './components/DepsCheck';
 
 const TABS = [
-  { id: 'download', label: '下載 Download', icon: '📥' },
-  { id: 'series', label: '劇集 / 清單解析 Series & Playlist', icon: '📺' },
-  { id: 'live', label: '直播錄製 Live Recording', icon: '🔴' },
-  { id: 'settings', label: '設定 Settings', icon: '⚙️' },
+  { id: 'smart',    label: '智能 Smart',              icon: '✨' },
+  { id: 'queue',    label: '下載佇列 Queue',          icon: '📥' },
+  { id: 'download', label: '進階下載 Adv. Download',  icon: '🔧' },
+  { id: 'series',   label: '進階劇集 Adv. Series',    icon: '📺' },
+  { id: 'live',     label: '進階直播 Adv. Live',      icon: '🔴' },
+  { id: 'settings', label: '設定 Settings',           icon: '⚙️' },
 ];
 
 export default function App() {
   const { tasks, connected } = useWebSocket();
-  const [activeTab, setActiveTab] = useState('download');
+  const [activeTab, setActiveTab] = useState('smart');
+
+  // Backwards-compat shim — old child components call onSwitchTab('download')
+  // expecting the queue view; we now have 'queue' for that.
+  const switchTab = (tabId) => {
+    if (tabId === 'download') setActiveTab('queue');
+    else setActiveTab(tabId);
+  };
   const [deps, setDeps] = useState(null);
 
   useEffect(() => {
@@ -89,14 +99,26 @@ export default function App() {
       {deps && !deps['yt-dlp'] && activeTab !== 'settings' && <DepsCheck deps={deps} />}
 
       <main className="max-w-6xl mx-auto p-6">
+        {activeTab === 'smart' && (
+          <div className="space-y-6">
+            <SmartInput onSwitchTab={switchTab} />
+            {/* Always show queue below smart input so user can see progress */}
+            {tasks.length > 0 && <DownloadQueue tasks={tasks} />}
+          </div>
+        )}
+        {activeTab === 'queue' && (
+          <div className="space-y-6">
+            <DownloadQueue tasks={tasks} />
+          </div>
+        )}
         {activeTab === 'download' && (
           <div className="space-y-6">
             <UrlInput />
             <DownloadQueue tasks={tasks} />
           </div>
         )}
-        {activeTab === 'series' && <SeriesSelector onSwitchTab={setActiveTab} />}
-        {activeTab === 'live' && <LiveRecorder onSwitchTab={setActiveTab} />}
+        {activeTab === 'series' && <SeriesSelector onSwitchTab={switchTab} />}
+        {activeTab === 'live' && <LiveRecorder onSwitchTab={switchTab} />}
         {activeTab === 'settings' && <Settings deps={deps} />}
       </main>
     </div>
