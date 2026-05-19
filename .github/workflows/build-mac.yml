@@ -1,0 +1,301 @@
+name: Build Mac Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 1.2.0)'
+        required: true
+        default: '1.2.0'
+      arch:
+        description: 'Architecture to build'
+        required: true
+        default: 'arm64'
+        type: choice
+        options: ['arm64', 'x64', 'both']
+  push:
+    tags: ['v*']
+
+env:
+  NODE_VERSION: '20'
+  PORTABLE_NODE_VERSION: '20.18.0'
+  YT_DLP_URL: 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos'
+  # FFmpeg static binaries from evermeet (signed, notarized, no dylib deps)
+  FFMPEG_ARM64_URL: 'https://www.osxexperts.net/ffmpeg711arm.zip'
+  FFMPEG_X64_URL: 'https://evermeet.cx/ffmpeg/getrelease/zip'
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Decide which architectures to build (handle workflow_dispatch + tag push)
+  # ────────────────────────────────────────────────────────────────────────────
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      matrix:  ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          v="${{ github.event.inputs.version }}"
+          if [ -z "$v" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+              v="${GITHUB_REF#refs/tags/v}"
+            else
+              v="1.2.0"
+            fi
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building version: $v"
+
+      - name: Resolve arch matrix
+        id: matrix
+        shell: bash
+        run: |
+          arch="${{ github.event.inputs.arch }}"
+          # Tag pushes always build both architectures for full release coverage
+          if [[ "$GITHUB_REF" == refs/tags/v* ]] || [ "$arch" = "both" ]; then
+            echo 'matrix=[{"arch":"arm64","runner":"macos-latest"},{"arch":"x64","runner":"macos-13"}]' >> "$GITHUB_OUTPUT"
+          elif [ "$arch" = "x64" ]; then
+            echo 'matrix=[{"arch":"x64","runner":"macos-13"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix=[{"arch":"arm64","runner":"macos-latest"}]' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Per-architecture build
+  # ────────────────────────────────────────────────────────────────────────────
+  build:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.setup.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner info
+        run: |
+          uname -m
+          sw_vers
+          echo "Building for arch=${{ matrix.arch }} on ${{ matrix.runner }}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install root deps
+        run: npm install --no-audit --no-fund
+
+      - name: Build React client
+        working-directory: client
+        run: |
+          npm install --no-audit --no-fund
+          npx vite build
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Prepare .app bundle skeleton
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Set up .app structure
+        run: |
+          APP="packaging/MediaGrab.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+          # Copy launcher + Info.plist that were committed to repo
+          cp packaging/MediaGrab.app/Contents/Info.plist  "$APP/Contents/Info.plist" 2>/dev/null || true
+          cp packaging/MediaGrab.app/Contents/MacOS/MediaGrab "$APP/Contents/MacOS/MediaGrab" 2>/dev/null || true
+
+      - name: Restore launcher + Info.plist from git (CI checkout overwrote them)
+        run: |
+          git checkout HEAD -- packaging/MediaGrab.app/Contents/Info.plist packaging/MediaGrab.app/Contents/MacOS/MediaGrab
+          chmod +x packaging/MediaGrab.app/Contents/MacOS/MediaGrab
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Copy app source + install production deps into Resources/app/
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Copy app source
+        run: |
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          rm -rf "$RES/app"
+          mkdir -p "$RES/app"
+          cp -R server                  "$RES/app/"
+          mkdir -p "$RES/app/client"
+          cp -R client/dist             "$RES/app/client/dist"
+          cp package.json               "$RES/app/"
+          [ -f package-lock.json ] && cp package-lock.json "$RES/app/" || true
+
+      - name: Install production deps into payload
+        working-directory: packaging/MediaGrab.app/Contents/Resources/app
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: npm install --omit=dev --omit=optional --no-audit --no-fund --no-package-lock
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Download portable Node.js for the target arch
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Download portable Node.js
+        run: |
+          ARCH_TAG="${{ matrix.arch }}"
+          # nodejs.org uses "arm64" and "x64"
+          URL="https://nodejs.org/dist/v${{ env.PORTABLE_NODE_VERSION }}/node-v${{ env.PORTABLE_NODE_VERSION }}-darwin-${ARCH_TAG}.tar.gz"
+          echo "Fetching $URL"
+          curl -fsSL -o node.tar.gz "$URL"
+          mkdir -p node-extract
+          tar -xzf node.tar.gz -C node-extract
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          rm -rf "$RES/node"
+          mv "node-extract/node-v${{ env.PORTABLE_NODE_VERSION }}-darwin-${ARCH_TAG}" "$RES/node"
+          rm -rf node-extract node.tar.gz
+          # Slim down
+          rm -rf "$RES/node/share/doc" "$RES/node/share/man" "$RES/node/include" 2>/dev/null || true
+          "$RES/node/bin/node" --version
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Download yt-dlp_macos (single binary, includes Python)
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Download yt-dlp
+        run: |
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          mkdir -p "$RES/bin"
+          curl -fsSL -o "$RES/bin/yt-dlp" "${{ env.YT_DLP_URL }}"
+          chmod +x "$RES/bin/yt-dlp"
+          "$RES/bin/yt-dlp" --version
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Download ffmpeg static (per-arch URL)
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Download ffmpeg (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          curl -fsSL -o ffmpeg.zip "${{ env.FFMPEG_ARM64_URL }}"
+          unzip -o ffmpeg.zip -d ffmpeg-extract
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          # osxexperts builds put ffmpeg at root of zip
+          find ffmpeg-extract -name "ffmpeg" -type f -exec cp {} "$RES/bin/ffmpeg" \;
+          chmod +x "$RES/bin/ffmpeg"
+          rm -rf ffmpeg-extract ffmpeg.zip
+          file "$RES/bin/ffmpeg"
+          "$RES/bin/ffmpeg" -version | head -1
+
+      - name: Download ffmpeg (x64)
+        if: matrix.arch == 'x64'
+        run: |
+          curl -fsSL -o ffmpeg.zip "${{ env.FFMPEG_X64_URL }}"
+          unzip -o ffmpeg.zip -d ffmpeg-extract
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          find ffmpeg-extract -name "ffmpeg" -type f -exec cp {} "$RES/bin/ffmpeg" \;
+          chmod +x "$RES/bin/ffmpeg"
+          rm -rf ffmpeg-extract ffmpeg.zip
+          file "$RES/bin/ffmpeg"
+          "$RES/bin/ffmpeg" -version | head -1
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Install Playwright Chromium headless shell into ms-playwright/
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Install Playwright Chromium headless shell
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/packaging/MediaGrab.app/Contents/Resources/ms-playwright
+        run: |
+          cd packaging/MediaGrab.app/Contents/Resources/app
+          cli="node_modules/playwright/cli.js"
+          [ ! -f "$cli" ] && cli="node_modules/playwright-core/cli.js"
+          echo "Using $cli"
+          node "$cli" --version
+          if ! node "$cli" install --only-shell chromium; then
+            echo "--only-shell unsupported; installing full chromium"
+            node "$cli" install chromium
+          fi
+          ls -lh "$PLAYWRIGHT_BROWSERS_PATH"
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Ad-hoc sign all binaries so they pass Gatekeeper's library validation
+      # (For real distribution outside Apple Developer Program, the user still
+      # needs to xattr -dr com.apple.quarantine OR "Open Anyway" the .pkg.)
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Ad-hoc codesign bundled binaries
+        run: |
+          APP="packaging/MediaGrab.app"
+          RES="$APP/Contents/Resources"
+          chmod +x "$APP/Contents/MacOS/MediaGrab" "$RES/node/bin/node" "$RES/bin/yt-dlp" "$RES/bin/ffmpeg"
+          # Sign individual binaries first
+          for bin in "$RES/node/bin/node" "$RES/bin/yt-dlp" "$RES/bin/ffmpeg"; do
+            codesign --force --sign - "$bin" 2>&1 | head -2 || true
+          done
+          # Sign Playwright's dylibs and executables
+          find "$RES/ms-playwright" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -u=x \) -exec codesign --force --sign - {} \; 2>/dev/null || true
+          # Sign the entire app bundle last
+          codesign --force --deep --sign - "$APP" 2>&1 | head -5 || true
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Bundle size report
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Bundle size report
+        run: |
+          APP="packaging/MediaGrab.app"
+          echo "─── Bundle contents ───"
+          du -sh "$APP/Contents/Resources/"* 2>/dev/null || true
+          echo ""
+          echo "─── Total app size ───"
+          du -sh "$APP"
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Build the .pkg installer
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Build .pkg
+        run: |
+          VERSION="${{ needs.setup.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
+          BUNDLE_ID="com.mediagrab.app"
+          DIST="packaging/dist"
+          BUILD="packaging/build"
+
+          rm -rf "$BUILD" "$DIST"
+          mkdir -p "$BUILD/payload/Applications" "$DIST"
+          cp -R packaging/MediaGrab.app "$BUILD/payload/Applications/"
+
+          PKG_NAME="MediaGrab-${VERSION}-mac-${ARCH}.pkg"
+          pkgbuild \
+            --root "$BUILD/payload" \
+            --identifier "$BUNDLE_ID" \
+            --version "$VERSION" \
+            --install-location "/" \
+            "$DIST/$PKG_NAME"
+
+          ls -lh "$DIST/$PKG_NAME"
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Upload artifact + attach to Release on tag push
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Upload installer as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Mac-${{ matrix.arch }}-${{ needs.setup.outputs.version }}
+          path: packaging/dist/*.pkg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach to GitHub Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/dist/*.pkg
+          body: |
+            **MediaGrab ${{ needs.setup.outputs.version }} for macOS (${{ matrix.arch }})**
+
+            🍎 macOS 11+ self-contained installer for ${{ matrix.arch == 'arm64' && 'Apple Silicon (M1/M2/M3/M4)' || 'Intel Macs' }}.
+            Contains Node.js, yt-dlp, ffmpeg, Playwright Chromium — no external dependencies needed.
+
+            **Installation:**
+            1. Download `MediaGrab-${{ needs.setup.outputs.version }}-mac-${{ matrix.arch }}.pkg`
+            2. Double-click — if blocked, see "How to bypass Gatekeeper" in README
+            3. After install, launch MediaGrab from Launchpad
+            4. Browser opens automatically at http://localhost:9800
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
