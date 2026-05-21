@@ -16,6 +16,10 @@ on:
   push:
     tags: ['v*']
 
+# Allow the workflow's GITHUB_TOKEN to create/attach GitHub Releases
+permissions:
+  contents: write
+
 env:
   NODE_VERSION: '20'
   PORTABLE_NODE_VERSION: '20.18.0'
