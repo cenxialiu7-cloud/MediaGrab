@@ -85,7 +85,22 @@ export const AD_ZONES = {
 export const CLICK_OFFERS = {
   // Adsterra Smartlink — clicking opens Adsterra's ad landing page
   adsterraSmartlink: 'https://www.effectivecpmnetwork.com/gxjrfzuu?key=ca93120f051ab9908bb111734a180555',
+  // Monetag Direct Link — same model (clickable popunder/ad landing page)
+  monetagDirectLink: 'https://omg10.com/4/11036149',
 };
+
+// Returns the list of configured (non-blank) clickable ad links.
+export function getActiveClickOffers() {
+  return Object.values(CLICK_OFFERS).filter(u => u && u.trim().length > 0);
+}
+
+// Picks one clickable ad link at random — splits traffic across all configured
+// networks (Adsterra, Monetag, …) so each gets impressions / fill.
+export function pickClickOffer() {
+  const active = getActiveClickOffers();
+  if (active.length === 0) return '';
+  return active[Math.floor(Math.random() * active.length)];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Donation / support links — shown in Settings panel + after parse success

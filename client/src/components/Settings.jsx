@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import AdSlot from './AdSlot';
-import { VPN_OFFERS, SUPPORT_LINKS, withUtm } from '../monetization';
+import { VPN_OFFERS, SUPPORT_LINKS, getActiveClickOffers, pickClickOffer, withUtm } from '../monetization';
 
 export default function Settings({ deps, settings: parentSettings, onSettingsChange }) {
   const [settings, setSettings] = useState(parentSettings || null);
@@ -40,7 +40,9 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
 
   // Filter VPN offers to only those with real URLs configured
   const activeOffers = VPN_OFFERS.filter(o => o.url && o.url.trim().length > 0);
-  const hasSupport = SUPPORT_LINKS.kofi || activeOffers.length > 0;
+  // Pick one ad link (rotates across Adsterra / Monetag each render to split traffic)
+  const sponsoredLink = pickClickOffer();
+  const hasSupport = SUPPORT_LINKS.kofi || activeOffers.length > 0 || sponsoredLink;
 
   return (
     <div className="space-y-6">
@@ -199,9 +201,30 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
               </a>
             ))}
 
+            {sponsoredLink && (
+              <a
+                href={sponsoredLink}
+                target="_blank"
+                rel="noopener noreferrer sponsored"
+                className="flex items-center justify-between p-3 bg-dark-700 hover:bg-dark-600 rounded-lg transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">🎁</span>
+                  <div>
+                    <div className="text-sm font-medium flex items-center gap-2">
+                      看一則贊助廣告支持我們
+                      <span className="px-1.5 py-0.5 bg-dark-600 text-dark-300 rounded text-[10px]">廣告 Sponsored</span>
+                    </div>
+                    <div className="text-xs text-dark-300">點一下幫助維持伺服器運作 · One click helps keep this free</div>
+                  </div>
+                </div>
+                <span className="text-accent text-xs opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+              </a>
+            )}
+
             <p className="text-xs text-dark-400 pt-2">
               💡 透過上方連結購買 VPN 時，MediaGrab 會收到聯盟分潤，但不影響你的價格。
-              你也可以隨時在上方「關閉廣告」開關裡停用所有連結。
+              廣告連結會打開贊助商頁面。你可隨時在上方「關閉廣告」開關裡停用全部連結。
             </p>
           </div>
         </div>
