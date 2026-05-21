@@ -19,10 +19,19 @@ import { AD_ZONES } from '../monetization';
  * Fail-safe: if the network is blocked / unreachable, the empty container
  * just collapses — nothing visibly breaks.
  */
+// Build an isolated srcdoc for an Adsterra highperformanceformat iframe banner.
+function buildBannerSrcdoc({ key, width, height }) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">` +
+    `<style>html,body{margin:0;padding:0;overflow:hidden;background:transparent}</style></head><body>` +
+    `<script type="text/javascript">atOptions={'key':'${key}','format':'iframe','height':${height},'width':${width},'params':{}};<\/script>` +
+    `<script type="text/javascript" src="https://www.highperformanceformat.com/${key}/invoke.js"><\/script>` +
+    `</body></html>`;
+}
+
 export default function AdSlot({ name, disableAds = false, className = '' }) {
   const containerRef = useRef(null);
   const zone = AD_ZONES[name];
-  const hasAd = zone && (zone.scriptSrc || zone.inlineScript || zone.html);
+  const hasAd = zone && (zone.iframeBanner || zone.scriptSrc || zone.inlineScript || zone.html);
 
   useEffect(() => {
     if (!hasAd || disableAds || !containerRef.current) return;
@@ -32,6 +41,22 @@ export default function AdSlot({ name, disableAds = false, className = '' }) {
     containerRef.current.dataset.adLoaded = '1';
 
     const container = containerRef.current;
+
+    // 0. Isolated iframe banner (Adsterra highperformanceformat) — each in its
+    //    own document so the shared global `atOptions` never collides.
+    if (zone.iframeBanner) {
+      const { width, height } = zone.iframeBanner;
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('width', width);
+      iframe.setAttribute('height', height);
+      iframe.setAttribute('scrolling', 'no');
+      iframe.setAttribute('frameborder', '0');
+      iframe.setAttribute('title', 'Advertisement');
+      iframe.style.cssText = 'border:0;overflow:hidden;max-width:100%';
+      iframe.srcdoc = buildBannerSrcdoc(zone.iframeBanner);
+      container.appendChild(iframe);
+      return () => { if (container) { container.innerHTML = ''; delete container.dataset.adLoaded; } };
+    }
 
     // Optional named container div some networks require
     if (zone.containerId) {

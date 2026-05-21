@@ -69,33 +69,27 @@ export const VPN_OFFERS = [
 //
 // Any slot with all three fields blank renders nothing (invisible).
 // ─────────────────────────────────────────────────────────────────────────────
+// `iframeBanner` renders an Adsterra highperformanceformat banner inside an
+// isolated <iframe srcdoc> so multiple banners don't clobber the shared global
+// `atOptions`. Provide { key, width, height }.
 export const AD_ZONES = {
-  // Shown on the Smart tab welcome screen (before user pastes URL)
+  // Shown on the Smart tab welcome screen (before user pastes URL) — 728x90
   'smart-welcome': {
-    network: 'monetag',
-    scriptSrc: '',
-    inlineScript: '',   // ← paste Monetag In-Page Push / Banner snippet here
-    html: '',           // ← or paste Adsterra Native Banner HTML here
-    containerId: 'ad-smart-welcome',
+    network: 'adsterra',
+    iframeBanner: { key: 'b68a575ae3fd38bdbd457c83b93017df', width: 728, height: 90 },
     height: 90,
   },
-  // Shown when download queue is empty
+  // Shown when download queue is empty — 300x250
   'queue-empty': {
-    network: 'monetag',
-    scriptSrc: '',
-    inlineScript: '',
-    html: '',
-    containerId: 'ad-queue-empty',
+    network: 'adsterra',
+    iframeBanner: { key: 'edaa490f3a506385716ea337d3097972', width: 300, height: 250 },
     height: 250,
   },
-  // Shown at the bottom of Settings panel
+  // Shown at the bottom of Settings panel — 320x50 (compact)
   'settings-bottom': {
-    network: 'monetag',
-    scriptSrc: '',
-    inlineScript: '',
-    html: '',
-    containerId: 'ad-settings-bottom',
-    height: 90,
+    network: 'adsterra',
+    iframeBanner: { key: '3dfb8b9127addaf1d9d6380a4cd3aa9a', width: 320, height: 50 },
+    height: 50,
   },
 };
 
@@ -120,6 +114,8 @@ export const AD_ZONES = {
 export const CLICK_OFFERS = {
   // Adsterra Smartlink — clicking opens Adsterra's ad landing page
   adsterraSmartlink: 'https://www.effectivecpmnetwork.com/gxjrfzuu?key=ca93120f051ab9908bb111734a180555',
+  // Adsterra Direct Link #2
+  adsterraDirectLink2: 'https://www.effectivecpmnetwork.com/hbxhsn184?key=563ee7f7c6de60691a78c0562cee074d',
   // Monetag Direct Link — same model (clickable popunder/ad landing page)
   monetagDirectLink: 'https://omg10.com/4/11036149',
 };
