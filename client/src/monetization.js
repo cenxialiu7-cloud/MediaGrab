@@ -36,29 +36,64 @@ export const VPN_OFFERS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ad zone configuration — used by AdSlot.jsx
-// Each slot is identified by a name; AdSlot looks up which network + zone
-// to load. Set scriptSrc to a real ad-zone script URL to activate.
+// Display ad zones (IMAGE / VIDEO / NATIVE banners) — used by AdSlot.jsx
+//
+// These render visual ads (banner images, video, in-page push cards) INSIDE
+// the app. Each slot accepts ANY ONE of these three fields depending on what
+// your ad network gives you:
+//
+//   scriptSrc    — an external <script src="..."> URL
+//                  e.g. '//pl12345678.profitableratecpm.com/ab/cd/ef.js'
+//
+//   inlineScript — an inline JS snippet (paste between the <script> tags).
+//                  MONETAG IN-PAGE PUSH / VIGNETTE looks like:
+//                    "(function(d,z,s){s.src='https://'+d+'/400/'+z;...})
+//                       ('vemtoutcheeg.com',1234567,document.createElement('script'))"
+//
+//   html         — a full HTML embed snippet (Adsterra Native Banner gives this
+//                  as a <div> + <script> block — paste the whole thing here)
+//
+// ── HOW TO GET DISPLAY-AD CODE (image/video) ──────────────────────────────────
+// Monetag (most app-friendly): https://publishers.monetag.com → Websites/Direct
+//   1. Add a site OR use the "Social/App" flow
+//   2. Create an ad zone of type: In-Page Push (image+text), Banner 300x250
+//      (image), or Vignette (image/video)
+//   3. Copy the zone's JS snippet → paste into `inlineScript` below
+// Adsterra: https://beta.publishers.adsterra.com/websites
+//   1. Add Website → create Native Banner / Banner ad unit → Get Code
+//   2. Paste the whole HTML block into `html` below
+//
+// NOTE: display banners pay best with a verified public domain. On localhost
+// Monetag is the most lenient; Adsterra banner units may not count localhost
+// impressions. The clickable links in CLICK_OFFERS are the safest fallback.
+//
+// Any slot with all three fields blank renders nothing (invisible).
 // ─────────────────────────────────────────────────────────────────────────────
 export const AD_ZONES = {
   // Shown on the Smart tab welcome screen (before user pastes URL)
   'smart-welcome': {
-    network: 'adsterra',
-    scriptSrc: '',  // e.g. '//pl12345678.profitableratecpm.com/abc...js'
+    network: 'monetag',
+    scriptSrc: '',
+    inlineScript: '',   // ← paste Monetag In-Page Push / Banner snippet here
+    html: '',           // ← or paste Adsterra Native Banner HTML here
     containerId: 'ad-smart-welcome',
     height: 90,
   },
   // Shown when download queue is empty
   'queue-empty': {
-    network: 'propellerads',
-    scriptSrc: '',  // e.g. '//inpagepush.com/400/12345678'
+    network: 'monetag',
+    scriptSrc: '',
+    inlineScript: '',
+    html: '',
     containerId: 'ad-queue-empty',
     height: 250,
   },
   // Shown at the bottom of Settings panel
   'settings-bottom': {
-    network: 'adsterra',
+    network: 'monetag',
     scriptSrc: '',
+    inlineScript: '',
+    html: '',
     containerId: 'ad-settings-bottom',
     height: 90,
   },
