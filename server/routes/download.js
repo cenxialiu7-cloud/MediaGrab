@@ -46,12 +46,16 @@ router.post('/m3u8', async (req, res) => {
   try {
     const { m3u8Url, episodeUrl, title, filename, headers, outputDir, threads } = req.body;
 
-    if (!m3u8Url) return res.status(400).json({ error: 'm3u8Url is required' });
+    // Need at least one source: a direct m3u8 URL, or an episode page URL
+    // that the m3u8 service will lazy-extract (e.g. missav single-video sites).
+    if (!m3u8Url && !episodeUrl) {
+      return res.status(400).json({ error: 'm3u8Url or episodeUrl is required' });
+    }
 
     const task = taskManager.createTask({
       title: title || 'Stream Download',
-      url: m3u8Url,
-      m3u8Url,
+      url: m3u8Url || episodeUrl,
+      m3u8Url: m3u8Url || null,
       episodeUrl: episodeUrl || null,
       type: 'm3u8',
       filename,

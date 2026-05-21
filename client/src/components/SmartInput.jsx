@@ -163,6 +163,8 @@ function ResultRouter({ probe, url, onSwitchTab, onReset }) {
     case 'direct_stream':
     case 'direct_media':
       return <DirectStreamCard probe={probe} url={url} onReset={onReset} onSwitchTab={onSwitchTab} />;
+    case 'stream_video':
+      return <StreamVideoCard probe={probe} url={url} onReset={onReset} onSwitchTab={onSwitchTab} />;
     case 'video':
       return <VideoCard probe={probe} url={url} onReset={onReset} onSwitchTab={onSwitchTab} />;
     case 'unknown':
@@ -660,6 +662,60 @@ function DirectStreamCard({ probe, url, onReset, onSwitchTab }) {
         className="w-full px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors disabled:opacity-50"
       >
         {working ? '處理中 Working...' : (isStream ? '開始錄製 · Start Recording' : '開始下載 · Start Download')}
+      </button>
+      {error && (
+        <div className="mt-3 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">{error}</div>
+      )}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// StreamVideoCard — single-video streaming site (missav etc.) needing
+// just-in-time Playwright m3u8 extraction.
+// ───────────────────────────────────────────────────────────────────────────
+function StreamVideoCard({ probe, url, onReset, onSwitchTab }) {
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+
+  const startDownload = async () => {
+    setWorking(true);
+    setError('');
+    try {
+      // No m3u8Url — the m3u8 service lazy-extracts from episodeUrl via Playwright,
+      // filters out ad streams, follows the master playlist, downloads segments.
+      const res = await fetch('/api/download/m3u8', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          episodeUrl: url,
+          title: probe.title || 'video',
+          filename: `${probe.title || 'video'}.mp4`,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      onReset();
+      if (onSwitchTab) onSwitchTab('download');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="bg-dark-800 rounded-xl p-6 border border-dark-600 animate-slide-in">
+      <ResultHeader probe={probe} kindLabel="🎞️ 串流影片 Stream Video" kindColor="bg-pink-600/20 text-pink-300" />
+      <p className="text-sm text-dark-300 mb-4">
+        此網站的影片串流會在按下下載後即時解析（過濾廣告串流、自動選最高畫質），再以多線程下載。
+      </p>
+      <button
+        onClick={startDownload}
+        disabled={working}
+        className="w-full px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+      >
+        {working ? '解析並加入下載中...' : '解析並下載 · Extract & Download'}
       </button>
       {error && (
         <div className="mt-3 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">{error}</div>

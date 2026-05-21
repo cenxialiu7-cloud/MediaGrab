@@ -310,15 +310,24 @@ export async function extractM3u8(episodeUrl) {
 
     await context.close();
 
+    // Ad-network domains whose m3u8 streams are advertisements, not the real
+    // video (common on sites like missav that embed video-ad widgets).
+    const AD_M3U8_DOMAINS = [
+      'growcdnssedge.com', 'mavrtracktor.com', 'myavlive.com',
+      'adxadserv.com', 'bluetrafficstream.com', 'mavren.com',
+      'a-ads.com', 'exoclick.com', 'juicyads.com',
+    ];
+
     // Filter and rank m3u8 URLs:
     // - Skip player iframe URLs (they contain '?url=' or end in '.html')
+    // - Skip known ad-network streams
     // - Prefer URLs that end directly in .m3u8 (these are real playlists)
     // - Prefer higher-quality variants (1080, 2000k, etc.) if multiple exist
     const filtered = [...new Set(m3u8Entries)].filter(u => {
-      // Reject player wrapper URLs that just contain ?url= parameter
-      if (/[?&]url=https?/.test(u)) return false;
-      // Reject .html URLs (these are play pages)
-      if (/\.html(\?|$)/.test(u)) return false;
+      if (/[?&]url=https?/.test(u)) return false;          // player wrapper
+      if (/\.html(\?|$)/.test(u)) return false;            // play page
+      const host = (() => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } })();
+      if (AD_M3U8_DOMAINS.some(d => host.endsWith(d))) return false;  // ad stream
       return true;
     });
 
@@ -327,6 +336,8 @@ export async function extractM3u8(episodeUrl) {
         let s = 0;
         // Direct .m3u8 URL gets +10
         if (/\.m3u8($|\?)/.test(url)) s += 10;
+        // A master "playlist.m3u8" is preferred over a single-variant file
+        if (/playlist\.m3u8/i.test(url)) s += 3;
         // Prefer URLs with quality hints (1080, 720, 2000k, etc.)
         if (/1080|2000k|hd|hls/i.test(url)) s += 5;
         // Prefer shorter URLs (usually canonical), but only as tiebreaker

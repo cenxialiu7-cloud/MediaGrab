@@ -47,6 +47,25 @@ function isAggregator(url) {
   }
 }
 
+// Single-video streaming sites that yt-dlp doesn't support but whose page
+// embeds a real HLS stream we can extract via Playwright. Unlike aggregators
+// (which list episodes/routes), these are one video per page → download directly.
+const SINGLE_VIDEO_SITES = [
+  /(^|\.)missav\.(ws|com|to|ai|tv)$/,
+  /(^|\.)missav\d*\.(ws|com|to)$/,
+  /(^|\.)njav\.(tv|com)$/,
+  /(^|\.)supjav\.(com|tv)$/,
+];
+
+function isSingleVideoSite(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SINGLE_VIDEO_SITES.some(re => re.test(host));
+  } catch {
+    return false;
+  }
+}
+
 function isDirectMediaUrl(url) {
   return /\.(m3u8|mp4|webm|mov|mkv|flv|ts)(\?|$)/i.test(url);
 }
@@ -200,6 +219,21 @@ export async function probeUrl(rawUrl) {
       recorder: null,
       title: '影集網站 / 串流站',
       hint: '此網站需要透過劇集解析功能來抓取播放線路與集數',
+    };
+  }
+
+  // Single-video streaming site (e.g. missav) — yt-dlp can't, but the page
+  // embeds an HLS stream we extract via Playwright. One video → download directly.
+  if (isSingleVideoSite(url)) {
+    return {
+      url,
+      episodeUrl: url,                  // m3u8 service will lazy-extract from this page
+      kind: 'stream_video',
+      isLive: false,
+      recommendedAction: 'download_stream',
+      recorder: 'm3u8',
+      title: url.split('/').filter(Boolean).pop() || 'Video',
+      hint: '此頁面的影片串流會即時解析後下載',
     };
   }
 
