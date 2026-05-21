@@ -65,6 +65,29 @@ export const AD_ZONES = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Clickable sponsored links (e.g. Adsterra Smartlink / Direct Link).
+//
+// HOW TO GET AN ADSTERRA SMARTLINK (for desktop apps with no public website):
+//   1. Log in to https://beta.publishers.adsterra.com/links
+//   2. Click the green "ADD SMARTLINK" button
+//   3. Name it (e.g. "MediaGrab App"), pick a category, remove unwanted ad types
+//   4. Click "COPY LINK" — you'll get a URL like:
+//        https://www.profitableratecpm.com/xxxxxxxx?key=xxxxx
+//   5. Paste that URL below into `adsterraSmartlink`.
+//
+// NOTE: Adsterra *banner* ad-units (the AD_ZONES scriptSrc below) require a
+// verified public website and will NOT pay for localhost impressions, so for
+// this desktop app the Smartlink is the realistic Adsterra option.
+//
+// These are shown as clearly-labeled "贊助 Sponsored" links in Settings —
+// never disguised as download buttons (keeps us policy-clean & user-friendly).
+// ─────────────────────────────────────────────────────────────────────────────
+export const CLICK_OFFERS = {
+  // Adsterra Smartlink — clicking opens Adsterra's ad landing page
+  adsterraSmartlink: 'https://www.effectivecpmnetwork.com/gxjrfzuu?key=ca93120f051ab9908bb111734a180555',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Donation / support links — shown in Settings panel + after parse success
 // ─────────────────────────────────────────────────────────────────────────────
 export const SUPPORT_LINKS = {
