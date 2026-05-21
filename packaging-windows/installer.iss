@@ -34,7 +34,7 @@ WizardSizePercent=120
 ShowLanguageDialog=no
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
-; SetupIconFile=assets\icon.ico  ; uncomment when a real icon is provided
+SetupIconFile=assets\icon.ico
 
 ; Architecture
 ArchitecturesAllowed=x64compatible

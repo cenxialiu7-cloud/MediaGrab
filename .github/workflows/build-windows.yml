@@ -171,13 +171,18 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build launcher.exe
+      - name: Build launcher.exe (with embedded icon)
         shell: pwsh
         env:
           GOOS:   windows
           GOARCH: amd64
         run: |
           cd packaging-windows\launcher
+          # Embed the app icon into the .exe via a .syso resource (rsrc).
+          # `go build` automatically links any *.syso in the package dir.
+          go install github.com/akavel/rsrc@latest
+          $rsrc = "$(go env GOPATH)\bin\rsrc.exe"
+          & $rsrc -ico "..\..\packaging\assets\icon.ico" -arch amd64 -o rsrc.syso
           go build -ldflags="-H windowsgui -s -w" -trimpath -o ..\payload\MediaGrab.exe main.go
           (Get-Item ..\payload\MediaGrab.exe).Length / 1KB
 

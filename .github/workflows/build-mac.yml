@@ -121,6 +121,11 @@ jobs:
           git checkout HEAD -- packaging/MediaGrab.app/Contents/Info.plist packaging/MediaGrab.app/Contents/MacOS/MediaGrab
           chmod +x packaging/MediaGrab.app/Contents/MacOS/MediaGrab
 
+      - name: Install app icon
+        run: |
+          cp packaging/assets/AppIcon.icns packaging/MediaGrab.app/Contents/Resources/AppIcon.icns
+          ls -la packaging/MediaGrab.app/Contents/Resources/AppIcon.icns
+
       # ──────────────────────────────────────────────────────────────────────
       # Copy app source + install production deps into Resources/app/
       # ──────────────────────────────────────────────────────────────────────
