@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediaGrab — 個人影音備份工具 · Personal Video Backup Tool</title>
+  <meta name="description" content="MediaGrab 是免費的跨平台影音備份工具，支援 Mac 與 Windows。一鍵儲存你自己的影片、Creative Commons 與公開內容。" />
+  <meta name="keywords" content="影音備份, video backup, MediaGrab, Mac, Windows, downloader" />
+
+  <!-- Open Graph for social sharing -->
+  <meta property="og:title" content="MediaGrab — 個人影音備份工具" />
+  <meta property="og:description" content="免費跨平台影音備份工具，支援 Mac 與 Windows。" />
+  <meta property="og:type" content="website" />
+
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📥</text></svg>" />
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       AD NETWORK VERIFICATION + GLOBAL SCRIPT SLOT
+       Paste your Monetag / Adsterra site-verification meta tag or global
+       script here (e.g. Monetag's <meta name="monetag" content="..."> or
+       the site-wide anti-adblock / push script).
+       ════════════════════════════════════════════════════════════════════ -->
+  <!-- AD_VERIFY_META_PLACEHOLDER -->
+</head>
+<body>
+  <!-- ─── Header ─── -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#" class="logo">📥 <span>MediaGrab</span></a>
+      <nav>
+        <a href="#features">功能 Features</a>
+        <a href="#download">下載 Download</a>
+        <a href="#faq">常見問題 FAQ</a>
+        <a href="privacy.html">隱私 Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ─── Hero ─── -->
+  <section class="hero">
+    <div class="container">
+      <h1>個人影音備份工具<br/><span class="accent">Personal Video Backup Tool</span></h1>
+      <p class="lead">
+        免費、跨平台、零廣告干擾。一鍵儲存你自己的影片、Creative Commons 與公開內容到本機。
+        <br/>
+        <span class="muted">Free, cross-platform. Save your own videos, Creative Commons &amp; public content to your computer.</span>
+      </p>
+
+      <!-- Download buttons — populated dynamically from the latest GitHub Release -->
+      <div id="download" class="download-buttons">
+        <a id="dl-mac-arm" class="btn btn-primary" href="#" rel="noopener">
+          🍎 macOS (Apple Silicon)
+          <span class="btn-sub" id="dl-mac-arm-sub">M1 / M2 / M3 / M4</span>
+        </a>
+        <a id="dl-mac-intel" class="btn btn-secondary" href="#" rel="noopener">
+          🍎 macOS (Intel)
+          <span class="btn-sub">Intel Mac</span>
+        </a>
+        <a id="dl-win" class="btn btn-primary" href="#" rel="noopener">
+          🪟 Windows
+          <span class="btn-sub" id="dl-win-sub">Windows 10 / 11 (x64)</span>
+        </a>
+      </div>
+      <p class="version-note" id="version-note">正在載入最新版本… · Loading latest version…</p>
+    </div>
+  </section>
+
+  <!-- ═══ AD ZONE #1 — Leaderboard banner (728x90 image / video) ═══
+       Paste your Monetag/Adsterra banner code inside the div below. -->
+  <div class="ad-zone-wrap">
+    <div class="ad-label">廣告 · Advertisement</div>
+    <div id="ad-zone-leaderboard" class="ad-zone ad-leaderboard">
+      <!-- AD_ZONE_LEADERBOARD_PLACEHOLDER -->
+    </div>
+  </div>
+
+  <!-- ─── Features ─── -->
+  <section id="features" class="section">
+    <div class="container">
+      <h2>主要功能 · Features</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="feature-icon">✨</div>
+          <h3>智能網址辨識</h3>
+          <p>貼上任何網址，自動判斷該下載影片、批次解析清單，還是錄製直播。Smart URL detection routes every link automatically.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📃</div>
+          <h3>批次下載清單</h3>
+          <p>支援 YouTube 播放清單與頻道，一次勾選多支影片批次下載。Batch-download YouTube playlists &amp; channels.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔴</div>
+          <h3>直播錄製</h3>
+          <p>錄製 Twitch、YouTube Live 等直播，crash-safe 格式確保檔案完整。Record live streams safely.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎬</div>
+          <h3>多畫質選擇</h3>
+          <p>從 144p 到 4K，自由選擇下載畫質與格式。Choose any quality from 144p to 4K.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🆓</div>
+          <h3>完全免費</h3>
+          <p>所有功能免費，無付費鎖、無功能限制。100% free — every feature unlocked, forever.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔒</div>
+          <h3>本機運行</h3>
+          <p>程式在你自己的電腦運行，不上傳任何資料。Runs locally — no data leaves your computer.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ AD ZONE #2 — Rectangle (300x250 image / video) ═══ -->
+  <div class="ad-zone-wrap">
+    <div class="ad-label">廣告 · Advertisement</div>
+    <div id="ad-zone-rectangle" class="ad-zone ad-rectangle">
+      <!-- AD_ZONE_RECTANGLE_PLACEHOLDER -->
+    </div>
+  </div>
+
+  <!-- ─── How to use ─── -->
+  <section class="section section-alt">
+    <div class="container">
+      <h2>如何使用 · How to Use</h2>
+      <ol class="steps">
+        <li><strong>下載安裝</strong>：點上方按鈕下載適合你系統的版本並安裝。</li>
+        <li><strong>啟動程式</strong>：開啟 MediaGrab，瀏覽器會自動打開操作介面。</li>
+        <li><strong>貼上網址</strong>：在「智能 Smart」分頁貼上影音網址，按「解析」。</li>
+        <li><strong>開始下載</strong>：選擇畫質或集數，下載的檔案會存到「下載」資料夾。</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ─── FAQ ─── -->
+  <section id="faq" class="section">
+    <div class="container">
+      <h2>常見問題 · FAQ</h2>
+      <div class="faq-item">
+        <h3>MediaGrab 是免費的嗎？</h3>
+        <p>是的，完全免費。所有功能都解鎖，沒有付費版。我們透過選用性的廣告與 VPN 推薦連結來支應開發成本，你也可以在設定裡關閉它們。</p>
+      </div>
+      <div class="faq-item">
+        <h3>安裝時出現安全警告怎麼辦？</h3>
+        <p>因為程式未經 Apple/Microsoft 付費簽章，系統會顯示警告。Mac 請到「系統設定 → 隱私權與安全性 → 仍要打開」；Windows 請點「其他資訊 → 仍要執行」。詳見各平台安裝說明。</p>
+      </div>
+      <div class="faq-item">
+        <h3>支援哪些網站？</h3>
+        <p>支援數千個網站，包含 YouTube、Facebook、Instagram、抖音/TikTok、Twitter、Bilibili、Twitch 等。底層使用開源的 yt-dlp 引擎。</p>
+      </div>
+      <div class="faq-item">
+        <h3>下載的內容合法嗎？</h3>
+        <p>MediaGrab 是個人備份工具。請僅用於下載你擁有版權的內容、Creative Commons 授權內容、或你有權保存的公開內容。使用者需自行遵守來源網站的服務條款與當地著作權法。</p>
+      </div>
+      <div class="faq-item">
+        <h3>會收集我的資料嗎？</h3>
+        <p>MediaGrab 本身不收集、不上傳你的下載紀錄或任何個人資料。本下載頁面載入第三方廣告時可能放置 cookie，詳見<a href="privacy.html">隱私政策</a>。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Footer ─── -->
+  <footer class="site-footer">
+    <div class="container">
+      <p class="disclaimer">
+        MediaGrab 是個人影音備份工具。使用者需自行遵守來源網站服務條款與適用著作權法。
+        <br/>
+        MediaGrab is a personal video backup tool. Users are responsible for complying with source-site terms of service and applicable copyright law.
+      </p>
+      <p class="footer-links">
+        <a href="privacy.html">隱私政策 Privacy</a> ·
+        <a href="https://github.com/cenxialiu7-cloud/MediaGrab" rel="noopener">GitHub</a>
+      </p>
+      <p class="copyright">© 2026 MediaGrab. Free &amp; open.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
