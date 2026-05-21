@@ -200,6 +200,27 @@ jobs:
           file "$RES/bin/ffmpeg"
           "$RES/bin/ffmpeg" -version | head -1
 
+      # aria2 — bundle a standalone binary. Non-fatal: if the third-party
+      # source is unavailable, the build still succeeds (aria2 is optional;
+      # yt-dlp + the built-in segment downloader cover the core flows).
+      - name: Download aria2c (best-effort)
+        continue-on-error: true
+        run: |
+          RES="packaging/MediaGrab.app/Contents/Resources"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            URL="https://github.com/q741451/aria2c-macos-standalone-binary/releases/download/v1.0.0/aria2c-macos-arm64.tar.gz"
+          else
+            URL=""
+          fi
+          if [ -n "$URL" ]; then
+            curl -fsSL -o aria2.tgz "$URL" && tar -xzf aria2.tgz -C aria2-extract --one-top-level 2>/dev/null || (mkdir -p aria2-extract && tar -xzf aria2.tgz -C aria2-extract)
+            BIN=$(find aria2-extract -name "aria2c" -type f | head -1)
+            if [ -n "$BIN" ]; then cp "$BIN" "$RES/bin/aria2c"; chmod +x "$RES/bin/aria2c"; echo "aria2c bundled"; fi
+            rm -rf aria2-extract aria2.tgz
+          else
+            brew install aria2 && cp "$(brew --prefix)/bin/aria2c" "$RES/bin/aria2c" 2>/dev/null || echo "aria2 skipped"
+          fi
+
       # ──────────────────────────────────────────────────────────────────────
       # Install Playwright Chromium headless shell into ms-playwright/
       # ──────────────────────────────────────────────────────────────────────
@@ -228,9 +249,10 @@ jobs:
           APP="packaging/MediaGrab.app"
           RES="$APP/Contents/Resources"
           chmod +x "$APP/Contents/MacOS/MediaGrab" "$RES/node/bin/node" "$RES/bin/yt-dlp" "$RES/bin/ffmpeg"
-          # Sign individual binaries first
-          for bin in "$RES/node/bin/node" "$RES/bin/yt-dlp" "$RES/bin/ffmpeg"; do
-            codesign --force --sign - "$bin" 2>&1 | head -2 || true
+          [ -f "$RES/bin/aria2c" ] && chmod +x "$RES/bin/aria2c" || true
+          # Sign individual binaries first (aria2c only if it was bundled)
+          for bin in "$RES/node/bin/node" "$RES/bin/yt-dlp" "$RES/bin/ffmpeg" "$RES/bin/aria2c"; do
+            [ -f "$bin" ] && codesign --force --sign - "$bin" 2>&1 | head -2 || true
           done
           # Sign Playwright's dylibs and executables
           find "$RES/ms-playwright" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -u=x \) -exec codesign --force --sign - {} \; 2>/dev/null || true

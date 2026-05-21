@@ -148,11 +148,12 @@ class TaskManager {
   }
 
   getDependencyStatus() {
+    // streamlink dropped — yt-dlp now handles Twitch live too, so it's no
+    // longer a required dependency (and can't be cleanly bundled on macOS).
     return {
       'yt-dlp': checkCommand('yt-dlp'),
       ffmpeg: checkCommand('ffmpeg'),
       aria2c: checkCommand('aria2c'),
-      streamlink: checkCommand('streamlink'),
     };
   }
 }

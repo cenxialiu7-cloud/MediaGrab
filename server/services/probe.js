@@ -120,9 +120,10 @@ function classifyYtdlp(data, originalUrl) {
   const liveStatus = data.live_status;
   const isLive = data.is_live === true || liveStatus === 'is_live';
 
-  // Pick recorder based on extractor family
+  // Pick recorder based on extractor family.
+  // yt-dlp handles Twitch live well in 2026, so we no longer require the
+  // separate streamlink binary (which can't be cleanly bundled on macOS).
   let recorder = 'yt-dlp';
-  if (/^twitch/i.test(extractor)) recorder = 'streamlink';
   if (isDirectMediaUrl(originalUrl)) recorder = 'ffmpeg';
 
   const baseResult = {

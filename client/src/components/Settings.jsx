@@ -133,7 +133,6 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
             { key: 'yt-dlp', name: 'yt-dlp', desc: '核心影片下載引擎 · Core video downloader', install: 'pip install yt-dlp' },
             { key: 'ffmpeg', name: 'FFmpeg', desc: '影片處理與合併 · Video processing & merging', install: 'brew install ffmpeg' },
             { key: 'aria2c', name: 'aria2', desc: '多線程下載器 · Multi-threaded downloader', install: 'brew install aria2' },
-            { key: 'streamlink', name: 'Streamlink', desc: '直播錄製器 · Live stream recorder', install: 'pip install streamlink' },
           ].map(dep => (
             <div key={dep.key} className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
               <div className="flex items-center gap-3">

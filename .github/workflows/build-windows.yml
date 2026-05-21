@@ -121,6 +121,17 @@ jobs:
           Copy-Item "$binDir\ffprobe.exe" packaging-windows\payload\bin\
           Remove-Item -Recurse -Force ffmpeg-extract, ffmpeg.zip
 
+      - name: Download aria2c (static, win64)
+        shell: pwsh
+        run: |
+          $url = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+          Invoke-WebRequest -Uri $url -OutFile aria2.zip
+          Expand-Archive aria2.zip -DestinationPath aria2-extract
+          $a = Get-ChildItem -Recurse aria2-extract -Filter "aria2c.exe" | Select-Object -First 1
+          Copy-Item $a.FullName packaging-windows\payload\bin\
+          Remove-Item -Recurse -Force aria2-extract, aria2.zip
+          (Get-Item packaging-windows\payload\bin\aria2c.exe).Length / 1MB
+
       # ────────────────────────────────────────────────────────────────────
       # 5. Install Playwright Chromium headless shell into payload
       # ────────────────────────────────────────────────────────────────────
