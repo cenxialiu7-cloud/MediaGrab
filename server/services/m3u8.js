@@ -166,7 +166,20 @@ async function downloadSmart(task, outputPath) {
   }
 
   // Step 3: Download segments with PNG/wrapper handling
-  return await downloadSegments(task, outputPath, parsed.segments, parsed.encryption);
+  return await downloadSegments(task, outputPath, parsed);
+}
+
+// Parse a BYTERANGE attribute value ("length[@offset]"). When the offset is
+// omitted, HLS says it continues immediately after the previous sub-range of
+// the same resource (tracked via prevEndByUrl).
+function parseByteRange(spec, url, prevEndByUrl) {
+  const m = /^(\d+)(?:@(\d+))?/.exec(spec.trim());
+  if (!m) return null;
+  const length = parseInt(m[1], 10);
+  const start = m[2] != null ? parseInt(m[2], 10) : (prevEndByUrl.get(url) || 0);
+  const end = start + length - 1;   // inclusive (HTTP Range is inclusive)
+  prevEndByUrl.set(url, end + 1);
+  return { start, end, length };
 }
 
 function parseM3u8(content, baseUrl) {
@@ -174,11 +187,15 @@ function parseM3u8(content, baseUrl) {
   const result = {
     isMaster: false,
     variants: [],
-    segments: [],
+    segments: [],        // { url, range: {start,end,length}|null }
+    initSegment: null,   // fMP4 #EXT-X-MAP → { url, range|null }
+    isFmp4: false,
     encryption: null,
   };
 
   const base = new URL(baseUrl);
+  const prevEndByUrl = new Map();   // url → next byte offset (for offset-less ranges)
+  let pendingRange = null;          // range from a preceding #EXT-X-BYTERANGE line
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -194,6 +211,18 @@ function parseM3u8(content, baseUrl) {
           bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 0,
         });
       }
+    } else if (line.startsWith('#EXT-X-MAP')) {
+      // fMP4 initialization segment (contains moov). Required to play CMAF.
+      const uriMatch = line.match(/URI="([^"]+)"/);
+      const brMatch = line.match(/BYTERANGE="([^"]+)"/);
+      if (uriMatch) {
+        const url = resolveUrl(uriMatch[1], base);
+        result.initSegment = { url, range: brMatch ? parseByteRange(brMatch[1], url, prevEndByUrl) : null };
+      }
+    } else if (line.startsWith('#EXT-X-BYTERANGE')) {
+      const spec = line.slice(line.indexOf(':') + 1);
+      // Resolved against the *next* media line's URL — stash and apply below.
+      pendingRange = spec;
     } else if (line.startsWith('#EXT-X-KEY')) {
       const methodMatch = line.match(/METHOD=([^,]+)/);
       const uriMatch = line.match(/URI="([^"]+)"/);
@@ -206,9 +235,17 @@ function parseM3u8(content, baseUrl) {
         };
       }
     } else if (!line.startsWith('#') && line.length > 0) {
-      result.segments.push(resolveUrl(line, base));
+      const url = resolveUrl(line, base);
+      const range = pendingRange ? parseByteRange(pendingRange, url, prevEndByUrl) : null;
+      pendingRange = null;
+      result.segments.push({ url, range });
     }
   }
+
+  // Treat as fMP4/CMAF (binary-concat path) only when there's an init segment
+  // or byte-range segments — NOT merely because segments are .mp4. A playlist
+  // of whole .mp4 files must still go through the ffmpeg concat demuxer.
+  result.isFmp4 = !!result.initSegment || result.segments.some(s => s.range);
 
   // Sort variants by bandwidth (highest first)
   result.variants.sort((a, b) => b.bandwidth - a.bandwidth);
@@ -224,7 +261,12 @@ function resolveUrl(url, base) {
   }
 }
 
-async function downloadSegments(task, outputPath, segments, encryption) {
+async function downloadSegments(task, outputPath, parsed) {
+  const segments = parsed.segments;
+  const encryption = parsed.encryption;
+  const isFmp4 = parsed.isFmp4;
+  const initSegment = parsed.initSegment;
+
   const taskDir = path.join(TEMP_DIR, task.id);
   fs.mkdirSync(taskDir, { recursive: true });
 
@@ -232,6 +274,7 @@ async function downloadSegments(task, outputPath, segments, encryption) {
   const headers = task.headers || {};
   const concurrency = task.threads || 8;
   const tsFiles = new Array(totalSegments);
+  const ext = isFmp4 ? 'm4s' : 'ts';
   let downloadedBytes = 0;
   let completedCount = 0;
   let lastSpeedUpdate = Date.now();
@@ -250,42 +293,66 @@ async function downloadSegments(task, outputPath, segments, encryption) {
     }
   }
 
+  // Build the per-request header set for a segment, adding a byte-range header
+  // for fMP4/CMAF playlists that pack multiple segments into one resource.
+  const headersFor = (range) => {
+    if (!range) return headers;
+    return { ...headers, Range: `bytes=${range.start}-${range.end}` };
+  };
+
+  // Fetch one media part (init segment or media segment) into a Buffer.
+  const fetchPart = async (url, range) => {
+    const h = headersFor(range);
+    let res = await fetchInBrowserContext(url, h);
+    if (res.status === 403 || res.status === 404) {
+      const fallback = await fetchWithRefererFallback(url, h, task);
+      if (fallback && fallback.res && fallback.res.status >= 200 && fallback.res.status < 300) {
+        res = fallback.res;
+        Object.assign(headers, fallback.headers);
+      }
+    }
+    // 206 Partial Content is the expected success for ranged requests.
+    if (res.status !== 200 && res.status !== 206) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.bodyBuffer;
+  };
+
+  // Download the fMP4 initialization segment once — it carries the moov box
+  // without which the concatenated fragments are unplayable.
+  let initFile = null;
+  if (isFmp4 && initSegment) {
+    try {
+      const buf = await fetchPart(initSegment.url, initSegment.range);
+      initFile = path.join(taskDir, 'init.mp4');
+      fs.writeFileSync(initFile, buf);
+      downloadedBytes += buf.length;
+    } catch (err) {
+      taskManager.failTask(task.id, `Init segment fetch failed: ${err.message}`);
+      return;
+    }
+  }
+
   // Process segments with concurrency
-  const downloadOne = async (idx, segUrl, retries = 2) => {
-    const tsPath = path.join(taskDir, `seg_${String(idx).padStart(6, '0')}.ts`);
+  const downloadOne = async (idx, seg, retries = 2) => {
+    const tsPath = path.join(taskDir, `seg_${String(idx).padStart(6, '0')}.${ext}`);
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (task.status === 'cancelled') return false;
 
       try {
-        // Try with current headers; on 403, try Referer fallback once
-        let res = await fetchInBrowserContext(segUrl, headers);
-        if (res.status === 403 || res.status === 404) {
-          const fallback = await fetchWithRefererFallback(segUrl, headers, task);
-          if (fallback && fallback.res.status === 200) {
-            res = fallback.res;
-            // Persist working headers for subsequent segments
-            Object.assign(headers, fallback.headers);
-          }
-        }
-        if (res.status !== 200) {
-          if (attempt === retries) {
-            failedSegments.push({ idx, url: segUrl, status: res.status });
-            return false;
-          }
-          await sleep(500 * (attempt + 1));
-          continue;
-        }
-
-        let buffer = res.bodyBuffer;
+        let buffer = await fetchPart(seg.url, seg.range);
 
         // AES-128 decryption
         if (aesKey) {
           buffer = await decryptAES128(buffer, aesKey, encryption.iv, idx);
         }
 
-        // Strip image wrapper (PNG/JPG/BMP/GIF)
-        const tsData = stripImageWrapper(buffer);
+        // TS streams are sometimes wrapped in a fake image header; fMP4
+        // fragments are raw and must not be touched.
+        const tsData = isFmp4 ? buffer : stripImageWrapper(buffer);
 
         fs.writeFileSync(tsPath, tsData);
         tsFiles[idx] = tsPath;
@@ -295,7 +362,7 @@ async function downloadSegments(task, outputPath, segments, encryption) {
         return true;
       } catch (err) {
         if (attempt === retries) {
-          failedSegments.push({ idx, url: segUrl, error: err.message });
+          failedSegments.push({ idx, url: seg.url, status: err.status, error: err.message });
           return false;
         }
         await sleep(500 * (attempt + 1));
@@ -395,19 +462,44 @@ async function downloadSegments(task, outputPath, segments, encryption) {
     progress: 96,
   });
 
-  const concatFile = path.join(taskDir, 'concat.txt');
-  fs.writeFileSync(concatFile, validFiles.map(f => `file '${f}'`).join('\n'));
+  let proc;
+  if (isFmp4) {
+    // fMP4/CMAF: the init segment + fragments are contiguous parts of one
+    // file, so a binary concat (init first) reconstructs a valid fragmented
+    // MP4. Remux with -c copy to finalize the container (no aac_adtstoasc —
+    // that bitstream filter is for MPEG-TS only).
+    const mergedRaw = path.join(taskDir, 'merged.mp4');
+    const ws = fs.createWriteStream(mergedRaw);
+    const appendFile = (f) => new Promise((res, rej) => {
+      const rs = fs.createReadStream(f);
+      rs.on('error', rej); rs.on('end', res); rs.pipe(ws, { end: false });
+    });
+    if (initFile) await appendFile(initFile);
+    for (const f of validFiles) await appendFile(f);
+    await new Promise(r => ws.end(r));
 
-  const proc = spawn('ffmpeg', [
-    '-f', 'concat',
-    '-safe', '0',
-    '-i', concatFile,
-    '-c', 'copy',
-    '-bsf:a', 'aac_adtstoasc',
-    '-movflags', '+faststart',
-    '-y',
-    outputPath,
-  ]);
+    proc = spawn('ffmpeg', [
+      '-i', mergedRaw,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      '-y',
+      outputPath,
+    ]);
+  } else {
+    const concatFile = path.join(taskDir, 'concat.txt');
+    fs.writeFileSync(concatFile, validFiles.map(f => `file '${f}'`).join('\n'));
+
+    proc = spawn('ffmpeg', [
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', concatFile,
+      '-c', 'copy',
+      '-bsf:a', 'aac_adtstoasc',
+      '-movflags', '+faststart',
+      '-y',
+      outputPath,
+    ]);
+  }
 
   task.process = proc;
 

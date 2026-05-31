@@ -66,6 +66,20 @@ router.post('/streaming', async (req, res) => {
   }
 });
 
+// Scan an arbitrary webpage and list every video found on it (incl. nested
+// iframes / embeds). Powers the "paste any page → pick a video" flow.
+router.post('/scan-page', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    const result = await playwright.scanPageForVideos(url);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/extract-m3u8', async (req, res) => {
   try {
     const { url } = req.body;
