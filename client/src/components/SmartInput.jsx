@@ -134,6 +134,7 @@ export default function SmartInput({ onSwitchTab, disableAds = false }) {
             <div>⏰ <strong>預定直播</strong>：未開始的 YouTube/Twitch 排程直播</div>
             <div>🎥 <strong>HLS 直連</strong>：以 .m3u8 結尾的直接串流網址</div>
             <div>📼 <strong>直播重播 (VOD)</strong>：已結束的直播自動辨識為一般影片下載</div>
+            <div>🔍 <strong>任何含影片的網頁</strong>：貼上網址自動偵測頁面上（含內嵌播放器）的影片並列出選擇</div>
           </div>
         </div>
       )}
@@ -169,7 +170,10 @@ function ResultRouter({ probe, url, onSwitchTab, onReset }) {
       return <VideoCard probe={probe} url={url} onReset={onReset} onSwitchTab={onSwitchTab} />;
     case 'unknown':
     default:
-      return <UnknownCard probe={probe} onSwitchTab={onSwitchTab} />;
+      // Unknown URL → it's probably a normal webpage. Auto-scan it for any
+      // embedded videos and let the user pick. Falls back to the manual tabs
+      // if nothing is found.
+      return <WebpageScanCard probe={probe} url={url} onReset={onReset} onSwitchTab={onSwitchTab} />;
   }
 }
 
@@ -725,41 +729,205 @@ function StreamVideoCard({ probe, url, onReset, onSwitchTab }) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// UnknownCard — couldn't classify
+// WebpageScanCard — paste any webpage, auto-detect embedded videos, pick & download
 // ───────────────────────────────────────────────────────────────────────────
-function UnknownCard({ probe, onSwitchTab }) {
+function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
+  const [scanning, setScanning] = useState(true);
+  const [videos, setVideos] = useState([]);
+  const [pageTitle, setPageTitle] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [quality, setQuality] = useState({});   // videoId → quality url
+  const [error, setError] = useState('');
+  const [queueing, setQueueing] = useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setScanning(true);
+    setError('');
+    fetch('/api/parse/scan-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.error) { setError(data.error); return; }
+        const vids = data.videos || [];
+        setPageTitle(data.pageTitle || '');
+        setVideos(vids);
+        // Pre-select all found videos and default each to its best quality.
+        setSelected(new Set(vids.map(v => v.id)));
+        const q = {};
+        for (const v of vids) if (v.qualities?.length) q[v.id] = v.qualities[0].url;
+        setQuality(q);
+      })
+      .catch(e => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setScanning(false); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  const toggle = (id) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const typeBadge = (t) => ({
+    hls: ['HLS 串流', 'bg-cyan-600/20 text-cyan-300'],
+    dash: ['DASH 串流', 'bg-indigo-600/20 text-indigo-300'],
+    mp4: ['MP4 檔案', 'bg-green-600/20 text-green-300'],
+  }[t] || [t, 'bg-dark-700 text-dark-200']);
+
+  const handleDownload = async () => {
+    const picks = videos.filter(v => selected.has(v.id));
+    if (picks.length === 0) return;
+    setQueueing(true);
+    setError('');
+    try {
+      for (const v of picks) {
+        const baseName = (v.title || pageTitle || 'video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+        const filename = `${baseName}.mp4`;
+        if (v.type === 'hls') {
+          await fetch('/api/download/m3u8', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ m3u8Url: v.url, headers: v.headers, title: v.title, filename }),
+          });
+        } else if (v.type === 'mp4') {
+          const dlUrl = quality[v.id] || v.url;
+          await fetch('/api/download/aria2', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: dlUrl, headers: v.headers, filename }),
+          });
+        } else {
+          // DASH or other — let yt-dlp try the manifest URL directly.
+          await fetch('/api/download/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: v.url }),
+          });
+        }
+      }
+      onReset();
+      if (onSwitchTab) onSwitchTab('download');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setQueueing(false);
+    }
+  };
+
   return (
     <div className="bg-dark-800 rounded-xl p-6 border border-dark-600 animate-slide-in">
-      <ResultHeader
-        probe={probe}
-        kindLabel="❓ 無法辨識"
-        kindColor="bg-gray-600/20 text-gray-300"
-      />
-      <p className="text-sm text-dark-300 mb-2">
-        無法自動判斷這個網址的內容類型。
-      </p>
-      {probe.error && (
-        <p className="text-xs text-red-300 mb-3 bg-red-900/20 p-2 rounded">{probe.error}</p>
-      )}
-      <p className="text-sm text-dark-200 mb-3">可以嘗試以下進階分頁手動處理：</p>
-      <div className="flex flex-wrap gap-2">
-        {onSwitchTab && (
-          <>
-            <button onClick={() => onSwitchTab('download')}
-              className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">
-              📥 進階下載
-            </button>
-            <button onClick={() => onSwitchTab('series')}
-              className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">
-              📺 進階劇集解析
-            </button>
-            <button onClick={() => onSwitchTab('live')}
-              className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">
-              🔴 進階直播錄製
-            </button>
-          </>
-        )}
+      <div className="flex flex-wrap items-start gap-3 mb-4">
+        <span className="px-2 py-1 rounded-full text-xs bg-teal-600/20 text-teal-300">🔍 網頁影片偵測</span>
+        <div className="basis-full">
+          <h3 className="font-semibold">{pageTitle || '掃描網頁中的影片'}</h3>
+          <p className="text-xs text-dark-300 mt-0.5">自動偵測此網頁（含內嵌播放器 / iframe）中的影片</p>
+        </div>
       </div>
+
+      {scanning && (
+        <div className="flex items-center gap-3 p-4 bg-dark-700/50 rounded-lg text-sm text-dark-200">
+          <svg className="animate-spin h-5 w-5 text-accent" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          掃描頁面影片中，這可能需要 10～20 秒（會載入頁面並啟動播放器）...
+        </div>
+      )}
+
+      {!scanning && videos.length > 0 && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm text-dark-300">找到 {videos.length} 部影片 · 已選 {selected.size}：</p>
+            <button
+              onClick={() => setSelected(selected.size === videos.length ? new Set() : new Set(videos.map(v => v.id)))}
+              className="text-sm text-accent hover:text-accent-hover transition-colors"
+            >
+              {selected.size === videos.length ? '取消全選' : '全選'}
+            </button>
+          </div>
+
+          <div className="space-y-2 mb-4 max-h-96 overflow-y-auto pr-1">
+            {videos.map(v => {
+              const [label, color] = typeBadge(v.type);
+              return (
+                <div
+                  key={v.id}
+                  className={`flex gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                    selected.has(v.id) ? 'bg-dark-700 border-accent/50' : 'bg-dark-700/40 border-dark-600 hover:bg-dark-700'
+                  }`}
+                  onClick={() => toggle(v.id)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(v.id)}
+                    onChange={() => toggle(v.id)}
+                    onClick={e => e.stopPropagation()}
+                    className="mt-1 accent-accent"
+                  />
+                  {v.thumbnail
+                    ? <img src={v.thumbnail} alt="" className="w-28 h-16 object-cover rounded border border-dark-600 flex-shrink-0" />
+                    : <div className="w-28 h-16 rounded bg-dark-600 flex items-center justify-center text-2xl flex-shrink-0">🎬</div>}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${color}`}>{label}</span>
+                    </div>
+                    <p className="text-sm truncate" title={v.title}>{v.title}</p>
+                    {v.qualities?.length > 0 && (
+                      <select
+                        value={quality[v.id] || v.qualities[0].url}
+                        onChange={e => { e.stopPropagation(); setQuality(q => ({ ...q, [v.id]: e.target.value })); }}
+                        onClick={e => e.stopPropagation()}
+                        className="mt-1 bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-accent"
+                      >
+                        {v.qualities.map((q, i) => (
+                          <option key={i} value={q.url}>{q.label}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleDownload}
+            disabled={selected.size === 0 || queueing}
+            className="w-full px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+          >
+            {queueing ? '加入下載中...' : `下載所選 · Download — ${selected.size} 部影片`}
+          </button>
+          <p className="text-xs text-dark-400 mt-2 text-center">
+            HLS 串流會多線程分段下載後合併；MP4 以多連線直接下載。
+          </p>
+        </>
+      )}
+
+      {!scanning && videos.length === 0 && !error && (
+        <div className="p-4 bg-dark-700/50 rounded-lg text-sm text-dark-200">
+          <p className="mb-3">這個頁面上沒有偵測到可下載的影片。可能原因：影片需要登入、有 DRM 保護，或只在使用者互動後才載入。</p>
+          <ManualFallback onSwitchTab={onSwitchTab} />
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-300 text-sm">
+          <p className="mb-2">掃描失敗：{error}</p>
+          <ManualFallback onSwitchTab={onSwitchTab} />
+        </div>
+      )}
     </div>
   );
 }
+
+// Shared manual-tab fallback buttons.
+function ManualFallback({ onSwitchTab }) {
+  if (!onSwitchTab) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button onClick={() => onSwitchTab('download')} className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">📥 進階下載</button>
+      <button onClick={() => onSwitchTab('series')} className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">📺 進階劇集解析</button>
+      <button onClick={() => onSwitchTab('live')} className="px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm">🔴 進階直播錄製</button>
+    </div>
+  );
+}
+
