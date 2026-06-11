@@ -1,12 +1,17 @@
 # MediaGrab — Monetization Configuration Guide
 
+> ⚠️ **2026-06 更新：VPN 聯盟管道已證實無法取得**（NordVPN / Surfshark / ExpressVPN
+> 申請皆無法通過 / 不開放本案類型）。VPN 已從變現策略移除，**主收入改為顯示廣告**
+> （Adsterra / Monetag），抖內為輔。程式內 `VPN_OFFERS` url 留空 → SponsorBar 自動隱藏，
+> 無需改碼；本文件中 VPN 相關段落僅保留作歷史紀錄。
+
 ## 概覽 / Overview
 
 MediaGrab 全功能免費，透過以下方式支援開發成本：
 
-1. **VPN 聯盟（主收入）** — NordVPN / Surfshark 等 affiliate program
-2. **顯示廣告（次收入）** — PropellerAds / Adsterra 等可接受影音工具的聯播網
-3. **抖內** — Ko-fi / Buy Me a Coffee
+1. **顯示廣告（主收入）** — Adsterra / Monetag 等可接受影音工具的聯播網（banner + Smartlink/Direct Link）
+2. **抖內（次收入）** — Ko-fi / Buy Me a Coffee
+3. ~~**VPN 聯盟**~~ — ❌ 已證實無法取得，停止投入（見上方更新）
 
 **所有變現元素都尊重使用者**：
 - 設定頁面有「關閉廣告」開關，一鍵全部關掉
@@ -18,13 +23,16 @@ MediaGrab 全功能免費，透過以下方式支援開發成本：
 
 ## 設定步驟（站長 / 維護者）
 
-### 1. 註冊聯盟帳號
+### 1. ~~註冊 VPN 聯盟帳號~~ ❌ 已證實無法取得
 
-| 聯盟 | 註冊網址 | 審核時間 | 單次轉換獎金 |
-|------|---------|---------|-----------|
-| NordVPN | https://nordvpn.com/affiliate/ | 即時 | $22-36 (40-100% 首月 + 30% 續訂) |
-| Surfshark | https://surfshark.com/affiliates | 1-2 日 | $20-30 |
-| ExpressVPN | https://www.expressvpn.com/affiliates | 1-3 日 | $13-36 |
+> 2026-06：以下 VPN 聯盟管道皆無法取得（申請未通過 / 不開放本案類型），**不要再投入時間嘗試**。
+> 此表僅保留作歷史紀錄。主收入改走「2. 廣告聯播網」。
+
+| 聯盟 | 註冊網址 | 狀態 | （原）單次轉換獎金 |
+|------|---------|------|-----------|
+| ~~NordVPN~~ | https://nordvpn.com/affiliate/ | ❌ 無法取得 | $22-36 |
+| ~~Surfshark~~ | https://surfshark.com/affiliates | ❌ 無法取得 | $20-30 |
+| ~~ExpressVPN~~ | https://www.expressvpn.com/affiliates | ❌ 無法取得 | $13-36 |
 
 ### 2. 註冊廣告聯播網
 
@@ -88,11 +96,11 @@ gh workflow run build-windows.yml -f version=1.3.0
 
 | 元件 | 檔案 | 顯示位置 | 內容 |
 |------|------|---------|------|
-| **SponsorBar** | `client/src/components/SponsorBar.jsx` | 所有分頁的 header 下方 | VPN affiliate 橫幅，可關閉 |
+| ~~**SponsorBar**~~ | `client/src/components/SponsorBar.jsx` | 所有分頁的 header 下方 | ~~VPN affiliate 橫幅~~ → VPN 下架後 `VPN_OFFERS` url 留空，**此橫幅已自動隱藏**（程式碼保留待未來換其他聯盟） |
 | **AdSlot: smart-welcome** | 用在 `SmartInput.jsx` | 智能分頁初始畫面 | 廣告 banner |
 | **AdSlot: queue-empty** | 用在 `DownloadQueue.jsx` | 下載佇列空白時 | 廣告 banner |
 | **AdSlot: settings-bottom** | 用在 `Settings.jsx` | 設定分頁底部 | 廣告 banner |
-| **Support section** | `Settings.jsx` | 設定分頁中段 | Ko-fi 連結 + VPN 推薦 |
+| **Support section** | `Settings.jsx` | 設定分頁中段 | Ko-fi 連結（VPN 推薦已下架，url 留空自動隱藏） |
 
 **所有元件都會在以下情況自動隱藏**：
 - `monetization.js` 對應的 URL/scriptSrc 為空字串
@@ -108,8 +116,7 @@ gh workflow run build-windows.yml -f version=1.3.0
 
 MediaGrab 是免費開源工具。為支援開發成本，本程式會：
 
-- 顯示 VPN 聯盟連結（NordVPN / Surfshark）— 你透過連結購買時，我們會收到分潤，但你的價格不變
-- 載入第三方廣告腳本（PropellerAds / Adsterra）— 這些腳本可能放置 cookies 並追蹤瀏覽行為
+- 載入第三方廣告腳本（Adsterra / Monetag）— 這些腳本可能放置 cookies 並追蹤瀏覽行為
 - 不收集、不傳送你的下載歷史或檔案內容到任何伺服器
 
 **你可以在「設定」分頁勾選「關閉廣告」一鍵停用所有第三方腳本與聯盟連結。**
@@ -125,10 +132,10 @@ operate under their own privacy policies (see PropellerAds / Adsterra).
 
 ### 每週固定看的數據
 
-1. **NordVPN dashboard** → Clicks / Conversions / Earnings
-2. **Adsterra dashboard** → Impressions / RPM / Earnings
-3. **PropellerAds dashboard** → Same
-4. **Ko-fi page** → Tip count
+1. **Adsterra dashboard** → Impressions / RPM / Earnings（主收入）
+2. **Monetag dashboard** → Impressions / RPM / Earnings
+3. **Ko-fi page** → Tip count
+4. ~~NordVPN dashboard~~ → VPN 聯盟已下架
 
 ### UTM 追蹤已內建
 
@@ -138,17 +145,15 @@ operate under their own privacy policies (see PropellerAds / Adsterra).
 - `utm_campaign=v1.3`
 - `utm_content=sponsorbar` 或 `settings`（依位置）
 
-讓你能在 NordVPN affiliate dashboard 看出**哪個位置轉換最好**。
+讓你能在 Adsterra / Monetag dashboard 看出**哪個位置/版位表現最好**。
 
 ---
 
 ## A/B 測試建議
 
-`monetization.js` 的 `VPN_OFFERS` 陣列可以放多個 offer。`SponsorBar` 目前用第一個有 URL 的；要 A/B 測試的話：
-
-1. 暫時兩個 offer 都填上自己的 affiliate URL（不同 `subId`）
-2. 每兩週切換哪個排第一
-3. 比較轉換率
+> ~~原針對 `VPN_OFFERS` 的 A/B 流程~~ — VPN 管道下架後不適用。
+> 改測顯示廣告時，可在 `CLICK_OFFERS`（Adsterra Smartlink / Direct Link、Monetag Direct Link）
+> 之間切換主力，用 `pickClickOffer()` 已內建的隨機分流比較各網路 fill / RPM。
 
 ---
 
@@ -166,7 +171,10 @@ App 內所有文案、README、產品說明都應使用：
 - ❌ 「破解地區限制看正版」
 - ❌ 任何具體版權內容名稱
 
-這是台灣著作權法 §87(1)(7) 安寶箱條款的關鍵防線：**有沒有「以營利為目的、廣告/誘使侵權」**。文案中性 + 廣告賣的是 VPN（非侵權服務）→ 安寶箱條款很難套用。
+這是台灣著作權法 §87(1)(7) 安寶箱條款的關鍵防線：**有沒有「以營利為目的、廣告/誘使侵權」**。文案中性 + 廣告為一般聯播網顯示廣告（非侵權服務、與下載標的無關）→ 安寶箱條款很難套用。
+
+> 註：VPN 聯盟下架後，廣告改為 Adsterra / Monetag 一般顯示廣告。法律姿態核心不變——
+> 關鍵仍是「文案中性、不誘使侵權」，而非廣告賣什麼。
 
 ---
 
@@ -193,7 +201,8 @@ gh workflow run build-windows.yml -f version=1.3.x
 
 - AdSense / 主流聯播網政策禁止 → 改走 PropellerAds / Adsterra
 - 桌面 App 模式 vs 架站 → 桌面 App 法律風險低 99%
-- VPN 聯盟單次 $22-36 → 每 1000 訪客 $10-70
+- ~~VPN 聯盟單次 $22-36 → 每 1000 訪客 $10-70~~ → **VPN 管道 2026-06 證實無法取得，此估算作廢**
 - Yout v. RIAA、Gimy 案 → 不接受付款 = 不像「販賣服務」 = 訴訟風險 < 1%
 
-預期年收：100 DAU $150-500 / 1000 DAU $1.8k-6k。
+預期年收：原估算大幅依賴 VPN 聯盟單次高獎金；VPN 下架後，收入主軸轉為顯示廣告 RPM
+（Adsterra / Monetag，每 1000 曝光約 $0.5-3，視地區/版位），**年收預期需依實際廣告數據重估**。
