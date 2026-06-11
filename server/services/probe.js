@@ -18,6 +18,7 @@
  */
 
 import { spawn } from 'child_process';
+import { ytdlpCookieArgs } from '../utils/cookies.js';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Aggregator domain list — these sites need Playwright, not yt-dlp
@@ -81,6 +82,10 @@ function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 15000 } = {}) {
       '--skip-download',
       '--socket-timeout', '10',
       '--extractor-retries', '1',
+      // fileOnly: a cookies.txt read is instant, but --cookies-from-browser does a
+      // cold read of the whole browser cookie DB that can exceed the 15s probe
+      // budget and spuriously fail a public probe. Downloads use the full source.
+      ...ytdlpCookieArgs(undefined, { fileOnly: true }),
     ];
     if (flatPlaylist) args.push('--flat-playlist');
     args.push(url);

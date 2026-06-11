@@ -82,6 +82,10 @@ jobs:
           Copy-Item -Recurse -Force client\dist\*   packaging-windows\payload\app\client\dist\
           Copy-Item -Force package.json             packaging-windows\payload\app\
           if (Test-Path package-lock.json) { Copy-Item -Force package-lock.json packaging-windows\payload\app\ }
+          # Companion browser extension + native messaging host
+          New-Item -ItemType Directory -Force -Path "packaging-windows\payload\app\extension", "packaging-windows\payload\app\native-host" | Out-Null
+          Copy-Item -Recurse -Force extension\*     packaging-windows\payload\app\extension\
+          Copy-Item -Recurse -Force native-host\*   packaging-windows\payload\app\native-host\
 
       - name: Install production deps into payload
         working-directory: packaging-windows/payload/app

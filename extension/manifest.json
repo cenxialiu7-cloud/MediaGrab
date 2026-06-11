@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "MediaGrab Companion",
+  "version": "0.1.0",
+  "description": "Capture login-gated / worker-hidden video streams from the page you're on and hand them to the MediaGrab app to download.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtpOsML31FazYKoaUKU5o7Ozepp0HI28m+ZbfFcYAxvT278AV7WpIWYWDCZsJO1dzeMYInRXd0reOt9/hNDe2m14hCv4B10p4p15oqcQo7jsBx4LwRlCnqfPlF2gyDMWtPMHdEWQGpjikMhwqc1q9RIQo/SWor6vD7A7/i7YyghYe+MG8NQ5O+c4g3pbWuRJXVRd8bie7bZSic/UF8B/8F9XIDn0Xbkf6bOk1I50g9ji4mu2f2oTD4WiuCY/PwoCvgzMg8fMDRW3nagMlitYVlTwVurERyaTzEpc2GL8s7dnERYiY/bbieHTiOQA/uHYarLEvSIJkwcaxqzlJyQ+grwIDAQAB",
+  "permissions": ["webRequest", "storage", "nativeMessaging", "activeTab"],
+  "optional_host_permissions": ["*://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "MediaGrab Companion"
+  }
+}

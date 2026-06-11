@@ -8,6 +8,8 @@ import downloadRoutes from './routes/download.js';
 import parseRoutes from './routes/parse.js';
 import liveRoutes from './routes/live.js';
 import settingsRoutes from './routes/settings.js';
+import captureRoutes from './routes/capture.js';
+import extensionRoutes from './routes/extension.js';
 import { taskManager } from './utils/taskManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +27,8 @@ app.use('/api/download', downloadRoutes);
 app.use('/api/parse', parseRoutes);
 app.use('/api/live', liveRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/capture', captureRoutes);
+app.use('/api/extension', extensionRoutes);
 
 app.get('/api/status', (req, res) => {
   res.json({
@@ -40,6 +44,8 @@ app.get('*', (req, res) => {
 
 setupWebSocket(server);
 
-server.listen(PORT, () => {
-  console.log(`\n  MediaGrab Server running at http://localhost:${PORT}\n`);
+// Bind loopback only — the API + WebSocket carry task data and the capture
+// endpoint; they must not be reachable from the local network.
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`\n  MediaGrab Server running at http://127.0.0.1:${PORT}\n`);
 });

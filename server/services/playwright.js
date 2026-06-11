@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { applyCookiesToContext } from '../utils/cookies.js';
 
 let browser = null;
 
@@ -43,6 +44,7 @@ export async function parseStreamingSite(url) {
     locale: 'zh-TW',
     ignoreHTTPSErrors: true,
   });
+  await applyCookiesToContext(context);   // authenticate login-gated sites
 
   const page = await context.newPage();
   await applyStealthScripts(page);
@@ -204,6 +206,7 @@ export async function extractM3u8(episodeUrl) {
     locale: 'zh-TW',
     ignoreHTTPSErrors: true,
   });
+  await applyCookiesToContext(context);   // authenticate login-gated sites
 
   const page = await context.newPage();
   await applyStealthScripts(page);
@@ -429,6 +432,7 @@ export async function scanPageForVideos(pageUrl) {
     locale: 'zh-TW',
     ignoreHTTPSErrors: true,
   });
+  await applyCookiesToContext(context);   // authenticate login-gated sites
   const page = await context.newPage();
   await applyStealthScripts(page);
 
@@ -683,6 +687,7 @@ async function getSharedFetchContext() {
     // Streaming CDNs often use self-signed or non-standard certs
     ignoreHTTPSErrors: true,
   });
+  await applyCookiesToContext(sharedFetchContext);   // authenticated segment fetches
   return sharedFetchContext;
 }
 
@@ -720,6 +725,19 @@ export async function fetchInBrowserContext(url, headers = {}) {
     body: bodyBuffer.toString('utf-8'),
     bodyBuffer,
   };
+}
+
+/**
+ * Drop the cached segment-fetch context so the next fetch rebuilds it and
+ * re-reads cookies.txt. Call when cookie settings change — otherwise the shared
+ * context keeps using the cookies loaded at first creation for the whole process
+ * lifetime (e.g. a re-exported, fresh session token wouldn't take effect).
+ */
+export async function resetFetchContext() {
+  if (sharedFetchContext) {
+    await sharedFetchContext.close().catch(() => {});
+    sharedFetchContext = null;
+  }
 }
 
 export async function closeBrowser() {

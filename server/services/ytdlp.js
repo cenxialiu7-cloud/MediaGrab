@@ -2,12 +2,13 @@ import { spawn } from 'child_process';
 import path from 'path';
 import os from 'os';
 import { taskManager } from '../utils/taskManager.js';
+import { ytdlpCookieArgs } from '../utils/cookies.js';
 
 const DEFAULT_OUTPUT = path.join(os.homedir(), 'Downloads', 'MediaGrab');
 
 export function getInfo(url) {
   return new Promise((resolve, reject) => {
-    const args = ['--dump-json', '--no-playlist', '--no-warnings', url];
+    const args = ['--dump-json', '--no-playlist', '--no-warnings', ...ytdlpCookieArgs(), url];
     const proc = spawn('yt-dlp', args, { timeout: 30000 });
     let out = '';
     let err = '';
@@ -23,7 +24,7 @@ export function getInfo(url) {
 
 export function getPlaylistInfo(url) {
   return new Promise((resolve, reject) => {
-    const args = ['--dump-json', '--flat-playlist', '--no-warnings', url];
+    const args = ['--dump-json', '--flat-playlist', '--no-warnings', ...ytdlpCookieArgs(), url];
     const proc = spawn('yt-dlp', args, { timeout: 60000 });
     let out = '';
     let err = '';
@@ -66,6 +67,7 @@ export function listYoutubeVideos(url) {
       '--flat-playlist',
       '--no-warnings',
       '--playlist-end', '500',  // safety cap
+      ...ytdlpCookieArgs(),
       target,
     ];
     const proc = spawn('yt-dlp', args, { timeout: 90000 });
@@ -124,12 +126,33 @@ export function startDownload(task) {
 
   if (task.format) {
     args.push('-f', task.format);
+  } else if (task.useCapturedHeaders) {
+    // Captured HLS/DASH usually has split video/audio tracks in non-mp4
+    // containers — the mp4-constrained default below fails with "Requested
+    // format is not available". Take best video + best audio (any container),
+    // fall back to best single, then remux to mp4 (no re-encode).
+    args.push('-f', 'bv*+ba/b', '--remux-video', 'mp4');
   } else {
     args.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best');
   }
 
-  if (task.cookies) {
-    args.push('--cookies-from-browser', task.cookies);
+  if (task.useCapturedHeaders) {
+    // Capture flow (companion extension): replicate the browser's exact request
+    // context — referer + headers incl. the live session Cookie — instead of the
+    // settings cookie source, so signed, login-gated manifests download as-is.
+    if (task.referer && !/[\r\n]/.test(task.referer)) args.push('--referer', task.referer);
+    if (task.headers && typeof task.headers === 'object') {
+      for (const [k, v] of Object.entries(task.headers)) {
+        if (!v || k.toLowerCase() === 'referer') continue;       // referer handled above
+        // Reject header-injection: name must be a token, value must be single-line.
+        if (!/^[A-Za-z0-9-]+$/.test(k) || /[\r\n]/.test(String(v))) continue;
+        args.push('--add-header', `${k}: ${v}`);
+      }
+    }
+  } else {
+    // Authenticate via the configured cookie source (cookies.txt file or browser).
+    // task.cookies, when present, is an explicit browser-name override.
+    args.push(...ytdlpCookieArgs(task.cookies));
   }
 
   args.push(task.url);

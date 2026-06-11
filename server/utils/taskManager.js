@@ -9,6 +9,30 @@ function checkCommand(cmd) {
   } catch { return false; }
 }
 
+// Redact secrets from a free-text error line before it leaves the server. yt-dlp
+// stderr can echo the signed media URL (itself a credential) or a Cookie/auth
+// header value; those must not reach the WebSocket / frontend DOM.
+function redactError(s) {
+  if (typeof s !== 'string') return s;
+  return s
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .replace(/((?:cookie|authorization|x-mediagrab-token)\s*[:=]\s*)\S+/gi, '$1[redacted]')
+    .slice(0, 300);
+}
+
+// Strip non-serializable (process, startFn) and sensitive (captured headers/
+// cookies — may contain a live session Cookie) fields, and redact the error
+// text, before a task ever leaves the server over WebSocket or the REST API.
+function publicTask(task) {
+  const { process, startFn, headers, referer, cookies, useCapturedHeaders, ...rest } = task;
+  if (rest.error) rest.error = redactError(rest.error);
+  // A captured manifest URL is itself a credential (signed token lives in the
+  // path or query, e.g. Vimeo's exp/hmac/psid) — never expose it. The user
+  // identifies the download by its title.
+  if (rest.type === 'capture' && rest.url) rest.url = '[captured stream]';
+  return rest;
+}
+
 class TaskManager {
   constructor() {
     this.tasks = new Map();
@@ -37,7 +61,7 @@ class TaskManager {
     };
     this.tasks.set(task.id, task);
     this.queue.push(task.id);
-    broadcast('task:created', task);
+    broadcast('task:created', publicTask(task));
     return task;
   }
 
@@ -45,7 +69,7 @@ class TaskManager {
     const task = this.tasks.get(id);
     if (!task) return null;
     Object.assign(task, updates);
-    broadcast('task:updated', task);
+    broadcast('task:updated', publicTask(task));
     return task;
   }
 
@@ -120,10 +144,7 @@ class TaskManager {
   }
 
   getAllTasks() {
-    return Array.from(this.tasks.values()).map(t => {
-      const { process, startFn, ...rest } = t;
-      return rest;
-    });
+    return Array.from(this.tasks.values()).map(publicTask);
   }
 
   removeTask(id) {

@@ -6,6 +6,8 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
   const [settings, setSettings] = useState(parentSettings || null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [extInfo, setExtInfo] = useState(null);
+  const [copied, setCopied] = useState('');
 
   useEffect(() => {
     if (!settings) {
@@ -18,6 +20,17 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
         .catch(() => {});
     }
   }, []);
+
+  useEffect(() => {
+    fetch('/api/extension/info').then(r => r.json()).then(setExtInfo).catch(() => {});
+  }, []);
+
+  const copy = (text, key) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(''), 1500);
+    }).catch(() => {});
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -81,7 +94,23 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
             </div>
           </div>
           <div>
-            <label className="block text-sm text-dark-200 mb-1">瀏覽器 Cookie（用於需登入的下載）· Browser Cookies</label>
+            <label className="block text-sm text-dark-200 mb-1">cookies.txt 檔案（需登入的串流／課程站）· cookies.txt File</label>
+            <input
+              type="text"
+              value={settings.cookiesFile || ''}
+              onChange={e => setSettings(s => ({ ...s, cookiesFile: e.target.value }))}
+              placeholder="/path/to/cookies.txt"
+              className="w-full bg-dark-700 border border-dark-500 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-accent transition-colors"
+            />
+            <p className="text-xs text-dark-400 mt-1">
+              用瀏覽器擴充（如「Get cookies.txt LOCALLY」）匯出 Netscape 格式 cookies.txt，填入路徑。
+              這是唯一能讓「登入後才看得到的串流／課程影片」下載的方式（同時餵 yt-dlp 與內建串流引擎）。
+              <br />
+              <span className="opacity-70">Export a Netscape cookies.txt from your logged-in browser; this is what unlocks login-gated streaming / course videos.</span>
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm text-dark-200 mb-1">瀏覽器 Cookie（僅 YouTube／FB 等 yt-dlp 站）· Browser Cookies</label>
             <select
               value={settings.cookies}
               onChange={e => setSettings(s => ({ ...s, cookies: e.target.value }))}
@@ -93,6 +122,10 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
               <option value="safari">Safari</option>
               <option value="edge">Edge</option>
             </select>
+            <p className="text-xs text-dark-400 mt-1">
+              直接讀取瀏覽器 cookie，免匯出檔案，但只對 yt-dlp 支援的站（YouTube／FB／IG…）有效，串流／課程站請改用上方 cookies.txt。
+              若同時設定，以 cookies.txt 優先。
+            </p>
           </div>
 
           {/* Disable Ads toggle — important for ePrivacy compliance */}
@@ -125,6 +158,57 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
           </button>
         </div>
       </div>
+
+      {/* Browser Extension setup — only shown when the extension files are present
+          (dev/repo, or a build that bundles them); hidden otherwise. */}
+      {extInfo?.available && (
+      <div className="bg-dark-800 rounded-xl p-6 border border-dark-600">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">瀏覽器擴充 · Browser Extension</h2>
+          {extInfo && (
+            <span className={`text-xs px-2 py-1 rounded-full ${extInfo.nativeHostRegistered ? 'bg-green-900/50 text-green-400' : 'bg-dark-600 text-dark-300'}`}>
+              {extInfo.nativeHostRegistered ? '✓ 已安裝橋接' : '尚未安裝'}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-dark-300 mb-4">
+          下載「需登入的串流／線上課程」影片（例如用 Vimeo 嵌入的課程站）。後端掃描器看不到、登入後才有的串流，由擴充在你<b>已登入的瀏覽器</b>裡擷取後交給 MediaGrab 下載。
+          <br /><span className="text-dark-400">Capture login-gated / worker-hidden streams from your logged-in browser and download them here.</span>
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm font-medium mb-1">1. 安裝 native 橋接（一次性）· Install native host</div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-dark-900 px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">{extInfo?.installCmd || 'node native-host/install.js'}</code>
+              <button onClick={() => copy(extInfo?.installCmd || '', 'cmd')} className="text-xs px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg shrink-0">{copied === 'cmd' ? '已複製' : '複製'}</button>
+            </div>
+            <div className="text-xs text-dark-400 mt-1">在終端機執行（註冊 Chrome / Brave / Edge 的 native messaging host）。</div>
+          </div>
+
+          <div>
+            <div className="text-sm font-medium mb-1">2. 載入擴充 · Load the extension</div>
+            <div className="text-xs text-dark-300 mb-1">chrome://extensions → 開「開發人員模式」→「載入未封裝項目」→ 選下面這個資料夾：</div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-dark-900 px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">{extInfo?.extensionDir || '…/extension'}</code>
+              <button onClick={() => copy(extInfo?.extensionDir || '', 'dir')} className="text-xs px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg shrink-0">{copied === 'dir' ? '已複製' : '複製路徑'}</button>
+            </div>
+            {extInfo?.extensionId && (
+              <div className="text-xs text-dark-400 mt-1">載入後確認 Extension ID：<code className="bg-dark-700 px-1.5 py-0.5 rounded">{extInfo.extensionId}</code></div>
+            )}
+          </div>
+
+          <div>
+            <div className="text-sm font-medium mb-1">3. 使用 · Use it</div>
+            <div className="text-xs text-dark-300">到課程／串流頁，點工具列的 MediaGrab 圖示 → <b>允許在此站擷取</b> → 播放影片幾秒 → <b>用 MediaGrab 下載</b>。下載會出現在「下載佇列」。</div>
+          </div>
+        </div>
+
+        <div className="mt-4 text-xs text-dark-500 border-t border-dark-700 pt-3">
+          ⚠️ 僅用於你<b>有觀看權限</b>的內容（個人備份）。目標站的服務條款可能禁止下載，帳號風險自負。
+        </div>
+      </div>
+      )}
 
       <div className="bg-dark-800 rounded-xl p-6 border border-dark-600">
         <h2 className="text-lg font-semibold mb-4">相依套件狀態 · Dependencies Status</h2>

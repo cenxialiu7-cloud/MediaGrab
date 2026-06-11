@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { taskManager } from '../utils/taskManager.js';
+import { resetFetchContext } from '../services/playwright.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -15,7 +16,8 @@ const defaultSettings = {
   language: 'zh-TW',
   theme: 'dark',
   autoStartQueue: true,
-  cookies: '',
+  cookies: '',       // browser name for yt-dlp --cookies-from-browser (yt-dlp path only)
+  cookiesFile: '',   // path to a Netscape cookies.txt — feeds BOTH yt-dlp and Playwright
   // Monetization opt-out — hides SponsorBar, AdSlot, and donation links.
   // Default false (= ads/affiliate visible) but user can flip in Settings.
   disableAds: false,
@@ -49,6 +51,12 @@ router.post('/', (req, res) => {
 
   if (updated.maxConcurrent !== current.maxConcurrent) {
     taskManager.setMaxConcurrent(updated.maxConcurrent);
+  }
+
+  // Cookie source changed → drop the cached segment-fetch context so the next
+  // download re-reads the new cookies.txt instead of the stale cached cookies.
+  if (updated.cookiesFile !== current.cookiesFile || updated.cookies !== current.cookies) {
+    resetFetchContext().catch(() => {});
   }
 
   res.json(updated);

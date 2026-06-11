@@ -139,6 +139,10 @@ jobs:
           cp -R client/dist             "$RES/app/client/dist"
           cp package.json               "$RES/app/"
           [ -f package-lock.json ] && cp package-lock.json "$RES/app/" || true
+          # Companion browser extension + native messaging host (loaded by the
+          # "Browser Extension" card in Settings).
+          cp -R extension               "$RES/app/extension"
+          cp -R native-host             "$RES/app/native-host"
 
       - name: Install production deps into payload
         working-directory: packaging/MediaGrab.app/Contents/Resources/app

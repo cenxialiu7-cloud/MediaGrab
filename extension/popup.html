@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: dark; }
+    body { width: 340px; margin: 0; font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+           background: #1b1d22; color: #e7e9ee; }
+    header { padding: 12px 14px; border-bottom: 1px solid #2c2f36; display: flex; align-items: center; gap: 8px; }
+    header b { font-size: 14px; }
+    .body { padding: 12px 14px; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
+    .muted { color: #9aa0ab; font-size: 12px; }
+    .pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #2c2f36; color: #c8ccd4; }
+    .pill.on { background: #14532d; color: #86efac; }
+    button { font: inherit; border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .primary { background: #2563eb; color: #fff; width: 100%; margin-top: 8px; }
+    .primary:disabled { opacity: .45; cursor: default; }
+    .ghost { background: #2c2f36; color: #e7e9ee; }
+    .status { margin-top: 10px; font-size: 12px; min-height: 16px; }
+    .ok { color: #86efac; } .err { color: #fca5a5; }
+    code { background: #2c2f36; padding: 1px 5px; border-radius: 5px; font-size: 11px; }
+    .list { margin: 6px 0 0; max-height: 90px; overflow:auto; }
+    .list div { font-size: 11px; color: #9aa0ab; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>MediaGrab</b>
+    <span id="siteState" class="pill">—</span>
+  </header>
+  <div class="body">
+    <div id="siteRow" class="row">
+      <span class="muted" id="siteName">讀取分頁中…</span>
+    </div>
+
+    <button id="enableBtn" class="ghost" style="display:none; width:100%;">允許在此站擷取影片</button>
+
+    <div id="detected" style="display:none;">
+      <div class="row">
+        <span>偵測到的影片串流</span>
+        <span style="display:flex; gap:6px; align-items:center;">
+          <span id="counts" class="pill">0</span>
+          <button id="clearBtn" class="ghost" style="font-size:11px; padding:2px 8px;">清除偵測</button>
+        </span>
+      </div>
+      <div class="list" id="manifestList"></div>
+      <button id="downloadBtn" class="primary" disabled>用 MediaGrab 下載</button>
+      <div class="muted" style="margin-top:6px;">需 MediaGrab App 開著（本機 server :9800）。下載只用於你有觀看權限的內容。</div>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
