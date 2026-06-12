@@ -296,8 +296,15 @@ jobs:
           cp -R packaging/MediaGrab.app "$BUILD/payload/Applications/"
 
           PKG_NAME="MediaGrab-${VERSION}-mac-${ARCH}.pkg"
+          # Disable bundle relocation. Without this, pkgbuild marks the app as
+          # relocatable, so the installer "relocates" into any existing
+          # com.mediagrab.app that Launch Services knows about (e.g. a dev copy)
+          # instead of installing to /Applications — the app then never appears.
+          pkgbuild --analyze --root "$BUILD/payload" "$BUILD/component.plist"
+          /usr/bin/python3 -c "import plistlib,sys; p=sys.argv[1]; c=plistlib.load(open(p,'rb')); [d.update(BundleIsRelocatable=False) for d in c]; plistlib.dump(c, open(p,'wb'))" "$BUILD/component.plist"
           pkgbuild \
             --root "$BUILD/payload" \
+            --component-plist "$BUILD/component.plist" \
             --identifier "$BUNDLE_ID" \
             --version "$VERSION" \
             --install-location "/" \
