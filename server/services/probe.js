@@ -74,7 +74,7 @@ function isDirectMediaUrl(url) {
 // ────────────────────────────────────────────────────────────────────────────
 // Run yt-dlp -J (dump single JSON) — single-shot probe
 // ────────────────────────────────────────────────────────────────────────────
-function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 15000 } = {}) {
+function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const args = [
       '-J',                  // --dump-single-json
@@ -95,7 +95,7 @@ function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 15000 } = {}) {
     let err = '';
     let timer = setTimeout(() => {
       try { proc.kill('SIGTERM'); } catch {}
-      reject(new Error('Probe timed out (15s)'));
+      reject(new Error(`Probe timed out (${Math.round(timeoutMs / 1000)}s)`));
     }, timeoutMs);
 
     proc.stdout.on('data', d => out += d);
@@ -257,7 +257,9 @@ export async function probeUrl(rawUrl) {
 
   // yt-dlp probe for everything else
   try {
-    const data = await ytdlpProbe(url, { flatPlaylist: true, timeoutMs: 15000 });
+    // 30s: the bundled yt-dlp binary's first (cold) YouTube extraction can take
+    // ~20s while it fetches+caches the player JS; 15s fell through to the scanner.
+    const data = await ytdlpProbe(url, { flatPlaylist: true, timeoutMs: 30000 });
     return classifyYtdlp(data, url);
   } catch (err) {
     // yt-dlp couldn't handle it — return unknown so frontend can offer fallback
