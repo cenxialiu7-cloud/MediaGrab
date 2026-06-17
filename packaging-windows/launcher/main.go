@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -33,10 +34,36 @@ func main() {
 	logPath := filepath.Join(userData, "server.log")
 	pidPath := filepath.Join(userData, "server.pid")
 
-	// Already running? Just open browser and exit.
+	// Already running on the port? Decide reuse vs. update-takeover.
 	if pingServer() {
-		openBrowser("http://localhost:" + port)
-		return
+		myVer := readVersion(filepath.Join(serverDir, "package.json"))
+		if running := runningVersion(); myVer != "" && running == myVer {
+			// Same version already running — just open the browser to it.
+			openBrowser("http://localhost:" + port)
+			return
+		}
+		// Older/unknown instance holds the port (e.g. you just updated) — ask it
+		// to quit, then wait for the port to free so this version takes over.
+		http.Post("http://localhost:"+port+"/api/quit", "application/json", nil)
+		for i := 0; i < 30; i++ {
+			if !pingServer() {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		// Last resort (e.g. an old build with no /api/quit still holding the
+		// port): force-stop the recorded server process so the update can start.
+		if pingServer() {
+			if b, err := os.ReadFile(pidPath); err == nil {
+				exec.Command("taskkill", "/PID", strings.TrimSpace(string(b)), "/F").Run()
+				for i := 0; i < 20; i++ {
+					if !pingServer() {
+						break
+					}
+					time.Sleep(300 * time.Millisecond)
+				}
+			}
+		}
 	}
 
 	// Build env for child Node process
@@ -91,6 +118,37 @@ func pingServer() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == 200
+}
+
+// runningVersion returns the version reported by an instance already on the port
+// (empty if none / unreadable / an older build that doesn't report a version).
+func runningVersion() string {
+	client := http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get("http://localhost:" + port + "/api/status")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	var data struct {
+		Version string `json:"version"`
+	}
+	json.NewDecoder(resp.Body).Decode(&data)
+	return data.Version
+}
+
+func readVersion(pkgPath string) string {
+	b, err := os.ReadFile(pkgPath)
+	if err != nil {
+		return ""
+	}
+	var data struct {
+		Version string `json:"version"`
+	}
+	json.Unmarshal(b, &data)
+	return data.Version
 }
 
 func openBrowser(url string) {

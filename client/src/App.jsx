@@ -23,6 +23,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('smart');
   const [deps, setDeps] = useState(null);
   const [settings, setSettings] = useState({ disableAds: false });
+  const [quitting, setQuitting] = useState(false);
+
+  const handleQuit = async () => {
+    if (!window.confirm('關閉 MediaGrab？進行中的下載會停止。\nQuit MediaGrab? In-progress downloads will stop.')) return;
+    setQuitting(true);
+    try { await fetch('/api/quit', { method: 'POST' }); } catch {}
+  };
 
   // Backwards-compat shim — old child components call onSwitchTab('download')
   // expecting the queue view; we now have 'queue' for that.
@@ -56,6 +63,18 @@ export default function App() {
     return sum + val / 1048576;
   }, 0);
 
+  if (quitting) {
+    return (
+      <div className="min-h-screen bg-dark-900 text-white flex items-center justify-center">
+        <div className="text-center px-6">
+          <div className="text-6xl mb-4">⏻</div>
+          <h2 className="text-2xl font-semibold mb-2">MediaGrab 已關閉</h2>
+          <p className="text-dark-200">可以關閉此分頁了。<br /><span className="opacity-70">You can close this tab now.</span></p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-dark-900 text-white">
       <header className="bg-dark-800 border-b border-dark-600 px-6 py-4">
@@ -81,6 +100,13 @@ export default function App() {
             </div>
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
               title={connected ? '已連線 Connected' : '已斷線 Disconnected'} />
+            <button
+              onClick={handleQuit}
+              title="關閉程式 · Quit MediaGrab"
+              className="ml-1 flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-red-900/60 text-dark-200 hover:text-red-200 transition-colors"
+            >
+              <span>⏻</span><span className="hidden sm:inline">關閉</span>
+            </button>
           </div>
         </div>
       </header>

@@ -2,6 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import os from 'os';
+import fs from 'fs';
 import cors from 'cors';
 import { setupWebSocket } from './ws.js';
 import downloadRoutes from './routes/download.js';
@@ -16,6 +18,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = createServer(app);
 const PORT = process.env.PORT || 9800;
+
+// App version — exposed in /api/status so a newer launcher can tell an older
+// running instance apart and take over the port on update.
+let APP_VERSION = '';
+try {
+  APP_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')).version || '';
+} catch {}
+
+// The launcher writes server.pid here (matches the Mac/Windows launchers).
+function userDataDir() {
+  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || os.homedir(), 'MediaGrab');
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'MediaGrab');
+  return path.join(os.homedir(), '.local', 'share', 'MediaGrab');
+}
 
 app.use(cors());
 app.use(express.json());
@@ -33,9 +49,25 @@ app.use('/api/extension', extensionRoutes);
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'running',
+    version: APP_VERSION,
     tasks: taskManager.getAllTasks(),
     dependencies: taskManager.getDependencyStatus()
   });
+});
+
+// Graceful shutdown — lets the "Quit" button (and a newer launcher taking over
+// the port on update) stop the background server cleanly. Kills in-progress
+// downloads so they don't orphan, removes the pid file, then exits.
+app.post('/api/quit', (req, res) => {
+  res.json({ ok: true, message: 'MediaGrab is shutting down' });
+  setTimeout(() => {
+    try { taskManager.shutdown(); } catch {}
+    try {
+      const pidFile = path.join(userDataDir(), 'server.pid');
+      if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+    } catch {}
+    process.exit(0);
+  }, 250);   // let the HTTP response flush first
 });
 
 app.get('*', (req, res) => {

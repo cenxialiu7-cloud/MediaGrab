@@ -1,6 +1,6 @@
 {
   "name": "mediagrab",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "Cross-platform video downloader with browser UI",
   "private": true,
   "type": "module",

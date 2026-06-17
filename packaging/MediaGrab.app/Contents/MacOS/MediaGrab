@@ -28,10 +28,33 @@ export NODE_ENV=production
 PORT=${PORT:-9800}
 export PORT
 
-# If a previous instance is already running, just open the browser to it
+# Version of THIS bundle (used to decide reuse vs. update-takeover)
+MY_VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$APP_DIR/package.json" 2>/dev/null | head -1)"
+
+# If an instance is already holding the port:
 if lsof -ti tcp:$PORT >/dev/null 2>&1; then
-  open "http://localhost:$PORT"
-  exit 0
+  RUNNING_VERSION="$(curl -s "http://localhost:$PORT/api/status" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1)"
+  if [ -n "$MY_VERSION" ] && [ "$RUNNING_VERSION" = "$MY_VERSION" ]; then
+    # Same version already running — just open the browser to it.
+    open "http://localhost:$PORT"
+    exit 0
+  fi
+  # An older/unknown instance holds the port (e.g. you just updated) — ask it to
+  # quit, then wait for the port to free so this version can take over.
+  curl -s -X POST "http://localhost:$PORT/api/quit" >/dev/null 2>&1 || true
+  for i in $(seq 1 30); do
+    lsof -ti tcp:$PORT >/dev/null 2>&1 || break
+    sleep 0.3
+  done
+  # Last resort (e.g. an old build with no /api/quit still holding the port):
+  # force-stop whatever holds the port so the update can take over.
+  if lsof -ti tcp:$PORT >/dev/null 2>&1; then
+    lsof -ti tcp:$PORT | xargs kill 2>/dev/null || true
+    for i in $(seq 1 20); do
+      lsof -ti tcp:$PORT >/dev/null 2>&1 || break
+      sleep 0.3
+    done
+  fi
 fi
 
 # Start the server, with logs going to ~/Library/Application Support/MediaGrab/server.log

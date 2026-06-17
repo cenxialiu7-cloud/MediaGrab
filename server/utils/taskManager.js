@@ -147,6 +147,14 @@ class TaskManager {
     return Array.from(this.tasks.values()).map(publicTask);
   }
 
+  // Kill every running child process — called on app quit so downloads don't
+  // keep running orphaned after the server exits.
+  shutdown() {
+    for (const task of this.tasks.values()) {
+      if (task.process) { try { task.process.kill('SIGTERM'); } catch {} }
+    }
+  }
+
   removeTask(id) {
     this.cancelTask(id);
     this.tasks.delete(id);
