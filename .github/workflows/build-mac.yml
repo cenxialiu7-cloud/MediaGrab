@@ -58,8 +58,12 @@ jobs:
         shell: bash
         run: |
           arch="${{ github.event.inputs.arch }}"
-          # Tag pushes always build both architectures for full release coverage
-          if [[ "$GITHUB_REF" == refs/tags/v* ]] || [ "$arch" = "both" ]; then
+          # NOTE: GitHub's macos-13 (Intel) runners are effectively unavailable —
+          # the x64 job queues for ~24h then gets cancelled, so it has never
+          # produced a pkg. Tag pushes therefore build arm64 only (reliable). To
+          # attempt an Intel build when runners are available, dispatch manually
+          # with arch=x64 or arch=both.
+          if [ "$arch" = "both" ]; then
             echo 'matrix=[{"arch":"arm64","runner":"macos-latest"},{"arch":"x64","runner":"macos-13"}]' >> "$GITHUB_OUTPUT"
           elif [ "$arch" = "x64" ]; then
             echo 'matrix=[{"arch":"x64","runner":"macos-13"}]' >> "$GITHUB_OUTPUT"
