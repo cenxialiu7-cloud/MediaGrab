@@ -217,6 +217,20 @@ function VideoCard({ probe, url, onReset, onSwitchTab, pastLive = false }) {
     return () => { cancelled = true; };
   }, [url]);
 
+  // Build a yt-dlp -f selector for a chosen format. YouTube's higher
+  // resolutions are video-only (DASH) — selecting one alone yields a silent
+  // file, so merge best audio onto any video-only pick.
+  const formatArg = (f) => {
+    const hasVideo = f.vcodec && f.vcodec !== 'none';
+    const hasAudio = f.acodec && f.acodec !== 'none';
+    if (hasVideo && !hasAudio) {
+      // Prefer m4a audio so an mp4 video stays mp4 (best compatibility);
+      // fall back to any best audio, then to the video-only stream.
+      return `${f.id}+bestaudio[ext=m4a]/${f.id}+bestaudio/${f.id}`;
+    }
+    return f.id;
+  };
+
   const startDownload = async (format = null) => {
     setDownloading(true);
     setError('');
@@ -267,13 +281,14 @@ function VideoCard({ probe, url, onReset, onSwitchTab, pastLive = false }) {
               .map(f => (
                 <button
                   key={f.id}
-                  onClick={() => startDownload(f.id)}
+                  onClick={() => startDownload(formatArg(f))}
                   disabled={downloading}
                   className="text-left p-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-sm transition-colors disabled:opacity-50"
                 >
                   <div className="font-medium">{f.resolution}</div>
                   <div className="text-xs text-dark-300">
                     {f.ext} {f.filesize ? `(${(f.filesize / 1048576).toFixed(0)}MB)` : ''}
+                    {f.vcodec && f.vcodec !== 'none' && (!f.acodec || f.acodec === 'none') && ' ＋音訊'}
                   </div>
                 </button>
               ))}
