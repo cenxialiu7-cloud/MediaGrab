@@ -85,7 +85,7 @@
 ### 推送上線
 
 ```bash
-cd "/Users/yoyo/Claude Code/MediaGrab"
+cd "$HOME/Claude Code/MediaGrab"
 git add docs/index.html
 git commit -m "chore: add Monetag display ad zones to landing page"
 git push

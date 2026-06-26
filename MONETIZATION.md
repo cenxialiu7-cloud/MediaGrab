@@ -197,7 +197,7 @@ gh workflow run build-windows.yml -f version=1.3.x
 
 ## 回顧研究依據
 
-整套變現策略源自 `/Users/yoyo/.claude/plans/1-2-starry-widget*.md` 的研究：
+整套變現策略源自前期研究：
 
 - AdSense / 主流聯播網政策禁止 → 改走 PropellerAds / Adsterra
 - 桌面 App 模式 vs 架站 → 桌面 App 法律風險低 99%

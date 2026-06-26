@@ -9,7 +9,7 @@
 
 ```bash
 # 1. 註冊 native messaging host（算出 extension ID、寫入 Chrome 設定）
-cd "/Users/yoyo/Claude Code/MediaGrab"
+cd "$HOME/Claude Code/MediaGrab"
 node native-host/install.js
 ```
 

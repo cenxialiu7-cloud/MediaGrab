@@ -80,7 +80,7 @@ diskutil eject "/Volumes/隨身碟"
 例如要發布 v1.3.0：
 
 ```bash
-cd "/Users/yoyo/Claude Code/MediaGrab"
+cd "$HOME/Claude Code/MediaGrab"
 
 # 1. 提交所有改動
 git add . && git commit -m "Release v1.3.0"
