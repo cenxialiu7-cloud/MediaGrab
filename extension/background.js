@@ -38,6 +38,7 @@ const KNOWN_MEDIA_HOSTS = [
 const KNOWN_MEDIA_DOMAINS = KNOWN_MEDIA_HOSTS.map((p) => p.replace(/^\*:\/\/\*\./, '').replace(/\/\*$/, ''));
 function hostAllowedForTab(url, tabOrigin) {
   try {
+    if (broadGranted) return true;      // broad mode → trust media from any host
     const h = new URL(url).hostname.toLowerCase();
     if (tabOrigin) { try { if (h === new URL(tabOrigin).hostname.toLowerCase()) return true; } catch {} }
     return KNOWN_MEDIA_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
@@ -88,9 +89,17 @@ function masterIdentity(url) {
 const capKey = (tabId) => 'cap:' + tabId;
 
 // ── opt-in gating ───────────────────────────────────────────────────────────
-// Host permission for shared CDNs (vimeocdn…) is necessarily broad, so we
-// SECOND-gate on the tab's page origin: only capture when the user explicitly
-// enabled that exact site. Keeps the "per-site opt-in" promise real.
+// Two modes:
+//  - Per-site (default): only capture on sites the user explicitly enabled.
+//  - Broad: once the user grants <all_urls>, capture on ANY site (like the
+//    general-purpose sniffers) — the "comprehensive" mode.
+let broadGranted = false;   // cached; refreshed on permission changes
+function refreshBroad() {
+  chrome.permissions.getAll((p) => {
+    const o = (p && p.origins) || [];
+    broadGranted = o.includes('<all_urls>') || o.includes('*://*/*');
+  });
+}
 async function getEnabledOrigins() {
   const o = await chrome.storage.local.get('enabledOrigins');
   return o.enabledOrigins || [];
@@ -103,7 +112,8 @@ async function addEnabledOrigin(origin) {
 async function isEnabledTab(tabId) {
   try {
     const t = await chrome.tabs.get(tabId);
-    if (!t || !t.url) return false;                 // url unreadable → not an opted-in site
+    if (!t || !t.url || !/^https?:/i.test(t.url)) return false;
+    if (broadGranted) return true;                  // broad mode → any site
     const origin = new URL(t.url).origin;
     return (await getEnabledOrigins()).includes(origin);
   } catch { return false; }
@@ -243,7 +253,11 @@ function syncCaptureListener() {
 // enabled — catches hidden manifests fetched by the player's JS and, as a last
 // resort, MSE segments that never hit the network as a manifest.
 async function syncContentScripts() {
-  const matches = (await getEnabledOrigins()).map((o) => o + '/*').filter((m) => /^https?:\/\//.test(m));
+  // Broad mode → inject into EVERY site (all frames), like the general sniffers.
+  // Per-site mode → only the enabled origins.
+  const matches = broadGranted
+    ? ['<all_urls>']
+    : (await getEnabledOrigins()).map((o) => o + '/*').filter((m) => /^https?:\/\//.test(m));
   const ids = ['mg-inject', 'mg-bridge'];
   try {
     // Always clear then re-register — avoids the "update requires an existing id"
@@ -262,11 +276,29 @@ async function syncContentScripts() {
   }
 }
 
-function onPermsChanged() { syncCaptureListener(); syncEnabledFromPermissions().then(syncContentScripts); }
+// Registered content scripts only apply to FUTURE page loads — inject into the
+// currently-open enabled tab too, so the hooks go live without a manual reload
+// (a reload still catches the earliest manifest most reliably).
+async function injectIntoActiveTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id || !tab.url || !/^https?:/i.test(tab.url)) return;
+    if (!(await isEnabledTab(tab.id))) return;
+    const target = { tabId: tab.id, allFrames: true };
+    chrome.scripting.executeScript({ target, world: 'MAIN', files: ['inject.js'] }).catch(() => {});
+    chrome.scripting.executeScript({ target, files: ['bridge.js'] }).catch(() => {});
+  } catch {}
+}
+
+function onPermsChanged() {
+  refreshBroad();
+  syncCaptureListener();
+  syncEnabledFromPermissions().then(syncContentScripts);
+}
 
 onPermsChanged();                                        // on SW startup / wake
-chrome.permissions.onAdded.addListener(onPermsChanged);
-chrome.permissions.onRemoved.addListener(syncCaptureListener);
+chrome.permissions.onAdded.addListener(() => { onPermsChanged(); setTimeout(injectIntoActiveTab, 300); });
+chrome.permissions.onRemoved.addListener(() => { onPermsChanged(); });
 chrome.runtime.onInstalled.addListener(onPermsChanged);
 chrome.runtime.onStartup.addListener(onPermsChanged);
 

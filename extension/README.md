@@ -30,8 +30,18 @@ chrome://extensions → 右上「開發人員模式」開 → 「載入未封裝
 
 1. 開啟課程／串流頁，點工具列的 **MediaGrab** 圖示。
 2. 按 **「允許在此站擷取影片」**（會請求此站 + 常見媒體 CDN 如 vimeocdn 的權限）。
+   → 授權後**會自動重新整理頁面**（串流的 master manifest 通常在頁面載入時就抓完了，
+   必須從頭載入才攔得到；這是「0 manifest」最常見的原因）。
 3. **播放影片**幾秒，讓播放器去抓 manifest / 片段。
 4. 再開一次 popup → 按 **「用 MediaGrab 下載」**。下載會出現在 MediaGrab App 的佇列。
+
+**抓不到？（非常見 CDN 的站）** popup 會出現 **「授予廣域權限再試」**。授權後進入
+**廣域模式**：對**任何網站的任何影片主機**都會偵測擷取（原理同 CocoCut/cat-catch 這類
+通用嗅探器）。同樣會自動重整頁面。
+
+**YouTube**：在 `youtube.com/watch`、Shorts、`youtu.be` 頁面直接顯示
+**「用 MediaGrab 下載此 YouTube 影片」**，一鍵把網址交給 yt-dlp（最佳畫質＋音訊自動合併），
+不需授權、不需嗅探。
 
 ## 運作原理（通用偵測，v0.2.0）
 

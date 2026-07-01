@@ -51,6 +51,17 @@ async function render() {
   try { host = new URL(tab.url).hostname; } catch {}
   $('siteName').textContent = host;
 
+  // YouTube fast-path: yt-dlp resolves watch/shorts/youtu.be URLs natively, so
+  // skip the whole permission + stream-sniff dance and just hand it the page URL.
+  if (/(^|\.)(youtube\.com|youtu\.be)$/i.test(host) && /[?&]v=|youtu\.be\/|\/shorts\/|\/live\//.test(tab.url)) {
+    $('youtubeBox').style.display = 'block';
+    $('enableBtn').style.display = 'none';
+    $('detected').style.display = 'none';
+    setStatus('YouTube 影片可直接下載，無需授權（需 MediaGrab App 開著）。', 'muted');
+    return;
+  }
+  $('youtubeBox').style.display = 'none';
+
   const fullSet = [origin, ...KNOWN_MEDIA_HOSTS];
   const originGranted = await chrome.permissions.contains({ origins: [origin] });
   const fullGranted = await chrome.permissions.contains({ origins: fullSet });
@@ -120,18 +131,23 @@ async function render() {
   }
 }
 
+async function enableAndReload(origins) {
+  const granted = await chrome.permissions.request({ origins });
+  if (!granted) { setStatus('未授權。', 'err'); return false; }
+  let bareOrigin = '';
+  try { bareOrigin = new URL(tab.url).origin; } catch {}
+  await chrome.runtime.sendMessage({ type: 'enableSite', origin: bareOrigin });
+  // The stream's master manifest is usually fetched at page load, BEFORE our
+  // hooks exist — so reload once so the detector sees it from the start.
+  setStatus('已啟用，正在重新整理頁面…播放影片即會偵測。', 'ok');
+  try { await chrome.tabs.reload(tab.id); } catch {}
+  setTimeout(() => window.close(), 400);
+  return true;
+}
+
 $('enableBtn').addEventListener('click', async () => {
-  try {
-    const granted = await chrome.permissions.request({ origins: [origin, ...KNOWN_MEDIA_HOSTS] });
-    if (granted) {
-      // Record the bare page origin so background only captures on this site.
-      let bareOrigin = '';
-      try { bareOrigin = new URL(tab.url).origin; } catch {}
-      await chrome.runtime.sendMessage({ type: 'enableSite', origin: bareOrigin });
-      setStatus('已啟用，請播放影片以偵測串流。', 'ok');
-      render();
-    } else setStatus('未授權。', 'err');
-  } catch (e) { setStatus('授權失敗：' + e.message, 'err'); }
+  try { await enableAndReload([origin, ...KNOWN_MEDIA_HOSTS]); }
+  catch (e) { setStatus('授權失敗：' + e.message, 'err'); }
 });
 
 $('clearBtn').addEventListener('click', async () => {
@@ -172,17 +188,35 @@ $('downloadBtn').addEventListener('click', async () => {
 });
 
 // Broad-permission upgrade — for sites whose media CDN isn't in the known list.
+// Grants <all_urls>: background flips to "broad mode" (capture on ANY site).
 $('broadBtn').addEventListener('click', async () => {
-  try {
-    const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
-    if (granted) {
-      let bareOrigin = '';
-      try { bareOrigin = new URL(tab.url).origin; } catch {}
-      await chrome.runtime.sendMessage({ type: 'enableSite', origin: bareOrigin });
-      setStatus('已授予廣域權限 — 重新整理頁面並播放影片再試。', 'ok');
-      render();
-    } else setStatus('未授權。', 'err');
-  } catch (e) { setStatus('授權失敗：' + e.message, 'err'); }
+  try { await enableAndReload(['<all_urls>']); }
+  catch (e) { setStatus('授權失敗：' + e.message, 'err'); }
+});
+
+// YouTube fast-path — hand the page URL straight to yt-dlp via the app.
+$('ytBtn').addEventListener('click', async () => {
+  const btn = $('ytBtn');
+  btn.disabled = true;
+  setStatus('傳送給 MediaGrab…', 'muted');
+  const payload = {
+    type: 'download',
+    payload: {
+      manifestUrl: tab.url,
+      mediaType: 'youtube',
+      headers: {},
+      referer: tab.url,
+      title: (tab.title || 'YouTube Video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120),
+      pageUrl: tab.url,
+    },
+  };
+  const resp = await chrome.runtime.sendMessage({ type: 'nativeDownload', payload });
+  if (resp && resp.ok) {
+    setStatus('✓ 已加入 MediaGrab 下載佇列' + (resp.taskId ? `（${resp.taskId.slice(0, 8)}）` : ''), 'ok');
+  } else {
+    setStatus('✗ ' + ((resp && resp.error) || '未知錯誤（確認 MediaGrab App 已開啟）'), 'err');
+    btn.disabled = false;
+  }
 });
 
 // MSE "record mode" — assembles captured segments and saves them via the page.
