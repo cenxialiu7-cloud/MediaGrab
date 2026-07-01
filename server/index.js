@@ -13,6 +13,7 @@ import settingsRoutes from './routes/settings.js';
 import captureRoutes from './routes/capture.js';
 import extensionRoutes from './routes/extension.js';
 import { taskManager } from './utils/taskManager.js';
+import { stageExtension } from './utils/extensionStaging.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -78,6 +79,15 @@ setupWebSocket(server);
 
 // Bind loopback only — the API + WebSocket carry task data and the capture
 // endpoint; they must not be reachable from the local network.
+// Copy the companion extension out of the read-only .app bundle into the
+// writable data dir BEFORE we start serving, so /api/extension/info can hand
+// the browser a folder its "Load unpacked" picker can actually navigate to.
+// Non-fatal: a staging failure must never stop the server from starting.
+try {
+  const staged = stageExtension();
+  if (staged.staged) console.log(`  Companion extension staged at: ${staged.dir}`);
+} catch (e) { console.warn('[mediagrab] extension staging skipped:', e && e.message); }
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  MediaGrab Server running at http://127.0.0.1:${PORT}\n`);
 });

@@ -8,6 +8,8 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
   const [saved, setSaved] = useState(false);
   const [extInfo, setExtInfo] = useState(null);
   const [copied, setCopied] = useState('');
+  const [hostBusy, setHostBusy] = useState(false);
+  const [hostMsg, setHostMsg] = useState('');
 
   useEffect(() => {
     if (!settings) {
@@ -30,6 +32,38 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
       setCopied(key);
       setTimeout(() => setCopied(''), 1500);
     }).catch(() => {});
+  };
+
+  const refreshExtInfo = () =>
+    fetch('/api/extension/info').then(r => r.json()).then(setExtInfo).catch(() => {});
+
+  // Open Finder/Explorer at the (server-known) staged extension folder so the
+  // user can drag it into chrome://extensions — the reliable alternative to
+  // navigating the picker into a hidden ~/Library path.
+  const revealExtension = () => {
+    setHostMsg('');
+    fetch('/api/extension/reveal', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { if (!d.ok) setHostMsg('✗ 無法開啟資料夾：' + (d.error || '')); })
+      .catch(() => setHostMsg('✗ 無法開啟資料夾'));
+  };
+
+  // One-click native-host install — runs native-host/install.js via the bundled
+  // node so the user doesn't need a terminal.
+  const installHost = () => {
+    setHostBusy(true); setHostMsg('');
+    fetch('/api/extension/install-host', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setHostBusy(false);
+        if (d.ok) {
+          setHostMsg('✓ 已安裝橋接' + (d.registered ? '' : '（尚未偵測到瀏覽器，開啟 Chrome 後可重按）'));
+          refreshExtInfo();
+        } else {
+          setHostMsg('✗ 安裝失敗：' + (d.error || ('exit ' + d.exitCode)) + ' — 可改用下方終端機指令');
+        }
+      })
+      .catch(() => { setHostBusy(false); setHostMsg('✗ 安裝失敗，請改用下方終端機指令'); });
   };
 
   const handleSave = async () => {
@@ -179,20 +213,39 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
         <div className="space-y-4">
           <div>
             <div className="text-sm font-medium mb-1">1. 安裝 native 橋接（一次性）· Install native host</div>
+            <button
+              onClick={installHost}
+              disabled={hostBusy}
+              className="w-full text-sm px-3 py-2 mb-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg font-medium"
+            >
+              {hostBusy ? '安裝中…' : (extInfo?.nativeHostRegistered ? '✓ 已安裝 — 重新安裝橋接（一鍵）' : '⚡ 一鍵安裝橋接')}
+            </button>
+            {hostMsg && <div className="text-xs mb-2 text-dark-200">{hostMsg}</div>}
+            <div className="text-xs text-dark-400 mb-1">或在終端機手動執行（等效）：</div>
             <div className="flex items-center gap-2">
               <code className="flex-1 text-xs bg-dark-900 px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">{extInfo?.installCmd || 'node native-host/install.js'}</code>
               <button onClick={() => copy(extInfo?.installCmd || '', 'cmd')} className="text-xs px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg shrink-0">{copied === 'cmd' ? '已複製' : '複製'}</button>
             </div>
-            <div className="text-xs text-dark-400 mt-1">在終端機執行（註冊 Chrome / Brave / Edge 的 native messaging host）。</div>
           </div>
 
           <div>
             <div className="text-sm font-medium mb-1">2. 載入擴充 · Load the extension</div>
-            <div className="text-xs text-dark-300 mb-1">chrome://extensions → 開「開發人員模式」→「載入未封裝項目」→ 選下面這個資料夾：</div>
+            <div className="text-xs text-dark-300 mb-1">chrome://extensions → 開「開發人員模式」→「載入未封裝項目」→ 選這個資料夾：</div>
             <div className="flex items-center gap-2">
               <code className="flex-1 text-xs bg-dark-900 px-3 py-2 rounded-lg overflow-x-auto whitespace-nowrap">{extInfo?.extensionDir || '…/extension'}</code>
               <button onClick={() => copy(extInfo?.extensionDir || '', 'dir')} className="text-xs px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg shrink-0">{copied === 'dir' ? '已複製' : '複製路徑'}</button>
             </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button onClick={revealExtension} className="text-xs px-3 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg shrink-0">
+                📂 {extInfo?.platform === 'win32' ? '在檔案總管中顯示' : '在 Finder 中顯示'}
+              </button>
+              <span className="text-xs text-dark-400">開啟後把 <b>extension</b> 資料夾直接拖進 Chrome 視窗即可載入</span>
+            </div>
+            {extInfo?.platform !== 'win32' && (
+              <div className="text-xs text-dark-400 mt-1">
+                💡 或在選取視窗按 <code className="bg-dark-700 px-1 rounded">⌘⇧G</code>，貼上上面的路徑最快（避免手動找隱藏的 ~/Library）。
+              </div>
+            )}
             {extInfo?.extensionId && (
               <div className="text-xs text-dark-400 mt-1">載入後確認 Extension ID：<code className="bg-dark-700 px-1.5 py-0.5 rounded">{extInfo.extensionId}</code></div>
             )}

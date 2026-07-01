@@ -7,24 +7,34 @@
 
 ## 安裝（一次性）
 
+**已安裝 App 的使用者：改在 App 內操作，不必開終端機。** 開 MediaGrab →「設定」→
+「瀏覽器擴充」卡片：
+
+1. 按 **「⚡ 一鍵安裝橋接」**（等同執行 `native-host/install.js`，註冊 native messaging host）。
+2. `chrome://extensions` → 開「開發人員模式」→「載入未封裝項目」，選卡片顯示的資料夾。
+   - 卡片有 **「📂 在 Finder 中顯示」** 按鈕：按了會把資料夾開出來，直接把 **extension**
+     資料夾**拖進** Chrome 視窗即可載入；或在選取視窗按 `⌘⇧G` 貼上卡片上的路徑。
+   - 確認顯示的 ID = `kpbhgcoabnkeapehoekebbjangfphjfn`。
+
+> **為什麼要「一鍵安裝」而不是直接選 App 裡的資料夾？** 安裝版的擴充原本在
+> `MediaGrab.app/Contents/Resources/app/extension`，但 `.app` 在 Finder 是「套件」，
+> 「載入未封裝項目」的選取視窗**進不去**。App 啟動時會把擴充**複製一份**到
+> `~/Library/Application Support/MediaGrab/extension`（一般資料夾，選得到），卡片顯示的
+> 就是這個可用路徑。每次 App 更新會自動同步（版本不同才重新複製）。
+
+### 開發者（從 repo 直接跑）
+
 ```bash
 # 1. 註冊 native messaging host（算出 extension ID、寫入 Chrome 設定）
 cd "$HOME/Claude Code/MediaGrab"
 node native-host/install.js
-```
-
-```text
-# 2. 載入擴充
-chrome://extensions → 右上「開發人員模式」開 → 「載入未封裝項目」→ 選 extension/ 資料夾
-   確認顯示的 ID = kpbhgcoabnkeapehoekebbjangfphjfn（與 install.js 印出的相同）
-```
-
-```text
+# 2. chrome://extensions → 開發人員模式 →「載入未封裝項目」→ 選 repo 的 extension/ 資料夾
 # 3. 開啟 MediaGrab App（啟動本機 server :9800）
 ```
 
-> 固定 extension ID 由 `manifest.json` 的 `key` 決定，所以 native host 的 `allowed_origins`
-> 對得上。若你改了 key 或搬動 repo，重跑 `node native-host/install.js`。
+> 固定 extension ID 由 `manifest.json` 的 `key` 決定（與載入路徑無關），所以搬到 staged
+> 資料夾載入不會改 ID，native host 的 `allowed_origins` 照樣對得上。若你改了 key 或搬動
+> repo，重跑 `node native-host/install.js`。
 
 ## 使用
 

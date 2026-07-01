@@ -44,6 +44,11 @@ mv "$RESOURCES/app/client-dist-tmp"   "$RESOURCES/app/client/dist"
 cp     "$PROJECT_ROOT/package.json"   "$RESOURCES/app/"
 cp     "$PROJECT_ROOT/package-lock.json" "$RESOURCES/app/" 2>/dev/null || true
 
+# Companion browser extension + native messaging host (staged out of the bundle
+# at runtime so Chrome's "Load unpacked" can reach it). Must match build-mac.yml.
+cp -R "$PROJECT_ROOT/extension"       "$RESOURCES/app/extension"
+cp -R "$PROJECT_ROOT/native-host"     "$RESOURCES/app/native-host"
+
 # Install only PRODUCTION dependencies into the bundle (smaller than copying full node_modules)
 echo "  Installing production deps..."
 cd "$RESOURCES/app"
