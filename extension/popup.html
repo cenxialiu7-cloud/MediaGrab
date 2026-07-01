@@ -45,7 +45,20 @@
         </span>
       </div>
       <div class="list" id="manifestList"></div>
+
+      <div id="drmBanner" style="display:none; margin-top:8px; padding:7px 9px; border-radius:8px; background:#3a1212; color:#fca5a5; font-size:12px;">
+        🔒 偵測到 DRM（<span id="drmKs"></span>）— 受保護內容無法下載。
+      </div>
+
       <button id="downloadBtn" class="primary" disabled>用 MediaGrab 下載</button>
+
+      <div id="mseSection" style="display:none; margin-top:8px;">
+        <div class="muted">🎬 錄製模式：已擷取 <span id="mseBytes">0</span>（無明文 manifest 的串流）。需邊播放邊擷取，從頭播放可錄完整。</div>
+        <button id="recordBtn" class="ghost" style="width:100%; margin-top:6px;">下載（錄製模式）</button>
+      </div>
+
+      <button id="broadBtn" class="ghost" style="display:none; width:100%; margin-top:8px; font-size:12px;">在此站抓不到？授予廣域權限再試</button>
+
       <div class="muted" style="margin-top:6px;">需 MediaGrab App 開著（本機 server :9800）。下載只用於你有觀看權限的內容。</div>
     </div>
 

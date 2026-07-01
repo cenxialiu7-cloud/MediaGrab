@@ -1,9 +1,18 @@
 /* MediaGrab Companion — popup logic */
 
+// Must match KNOWN_MEDIA_HOSTS in background.js — the major course-video CDNs.
 const KNOWN_MEDIA_HOSTS = [
-  '*://*.vimeo.com/*',   // player.vimeo.com HLS manifest + captions
-  '*://*.vimeocdn.com/*', '*://*.akamaized.net/*', '*://*.cloudfront.net/*',
-  '*://*.cdn77.com/*', '*://*.bunnycdn.com/*', '*://*.b-cdn.net/*', '*://*.fastly.net/*'
+  '*://*.vimeo.com/*', '*://*.vimeocdn.com/*',
+  '*://*.akamaized.net/*', '*://*.akamaihd.net/*',
+  '*://*.cloudfront.net/*', '*://*.fastly.net/*',
+  '*://*.cdn77.com/*', '*://*.cdn77.org/*',
+  '*://*.wistia.com/*', '*://*.wistia.net/*', '*://*.wistia.io/*',
+  '*://*.mux.com/*',
+  '*://*.brightcove.net/*', '*://*.boltdns.net/*',
+  '*://*.kaltura.com/*',
+  '*://*.jwplayer.com/*', '*://*.jwpcdn.com/*', '*://*.jwplatform.com/*',
+  '*://*.cloudflarestream.com/*', '*://*.videodelivery.net/*',
+  '*://*.b-cdn.net/*', '*://*.bunnycdn.com/*', '*://*.mediadelivery.net/*'
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -64,12 +73,13 @@ async function render() {
   const cap = await chrome.runtime.sendMessage({ type: 'getCapture', tabId: tab.id });
   const manifests = cap.manifests || [];
   const segCount = (cap.segments || []).length;
+  const mseBytes = (cap.mse && cap.mse.bytes) || 0;
   $('counts').textContent = `${manifests.length} manifest · ${segCount} 片段`;
 
   const list = $('manifestList');
   list.innerHTML = '';
-  // Lock onto the CURRENT video's master manifest (tracked by background as it
-  // resets on each lesson/video switch) — not a "best of accumulated pile".
+  // Lock onto the CURRENT video's master manifest (background resets it on each
+  // lesson/video switch) — not a "best of accumulated pile".
   const best = cap.primaryManifestUrl || pickManifest(manifests);
   if (best) {
     for (const m of manifests.slice(0, 6)) {
@@ -79,19 +89,34 @@ async function render() {
     }
   }
 
+  const hardDrm = /widevine|playready|\bfps\b|fairplay/i.test(cap.drm || '');
+  $('drmBanner').style.display = cap.drm ? 'block' : 'none';
+  if (cap.drm) $('drmKs').textContent = cap.drm;
+
+  if (mseBytes > 0) {
+    $('mseSection').style.display = 'block';
+    $('mseBytes').textContent = (mseBytes / 1048576).toFixed(1) + ' MB' + (cap.mse && cap.mse.truncated ? '（已達上限 1.5GB）' : '');
+  } else $('mseSection').style.display = 'none';
+
+  // Offer the broad-permission upgrade only when nothing's been detected.
+  const nothing = !best && segCount === 0 && mseBytes === 0;
+  $('broadBtn').style.display = nothing ? 'block' : 'none';
+
   const btn = $('downloadBtn');
-  if (best) {
-    btn.disabled = false;
-    btn.textContent = '用 MediaGrab 下載';
-    setStatus('已偵測到可下載的 manifest。', 'ok');
+  if (hardDrm) {
+    btn.disabled = true; btn.textContent = '🔒 受 DRM 保護，無法下載';
+    setStatus('此影片受 DRM（' + cap.drm + '）保護，無法下載。', 'err');
+  } else if (best) {
+    btn.disabled = false; btn.textContent = '用 MediaGrab 下載';
+    setStatus(cap.drm ? '偵測到 manifest（DRM 訊號不明，下載可能失敗）。' : '已偵測到可下載的 manifest。', cap.drm ? '' : 'ok');
   } else if (segCount > 0) {
-    btn.disabled = false;
-    btn.textContent = `下載（僅 ${segCount} 片段，無 manifest）`;
+    btn.disabled = false; btn.textContent = `下載（僅 ${segCount} 片段，無 manifest）`;
     setStatus('只偵測到片段、沒有 manifest — 伺服器可能無法重組（需 manifest）。', '');
   } else {
-    btn.disabled = true;
-    btn.textContent = '用 MediaGrab 下載';
-    setStatus('尚未偵測到串流 — 請在此分頁播放影片幾秒，再開此視窗。', 'muted');
+    btn.disabled = true; btn.textContent = '用 MediaGrab 下載';
+    setStatus(mseBytes > 0
+      ? '此串流無明文 manifest — 可用下方「錄製模式」下載。'
+      : '尚未偵測到串流 — 請在此分頁播放影片幾秒，再開此視窗。', 'muted');
   }
 }
 
@@ -144,6 +169,32 @@ $('downloadBtn').addEventListener('click', async () => {
     setStatus('✗ ' + err, 'err');
     btn.disabled = false;
   }
+});
+
+// Broad-permission upgrade — for sites whose media CDN isn't in the known list.
+$('broadBtn').addEventListener('click', async () => {
+  try {
+    const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
+    if (granted) {
+      let bareOrigin = '';
+      try { bareOrigin = new URL(tab.url).origin; } catch {}
+      await chrome.runtime.sendMessage({ type: 'enableSite', origin: bareOrigin });
+      setStatus('已授予廣域權限 — 重新整理頁面並播放影片再試。', 'ok');
+      render();
+    } else setStatus('未授權。', 'err');
+  } catch (e) { setStatus('授權失敗：' + e.message, 'err'); }
+});
+
+// MSE "record mode" — assembles captured segments and saves them via the page.
+$('recordBtn').addEventListener('click', async () => {
+  if (!tab) return;
+  setStatus('組合錄製資料中…', 'muted');
+  await chrome.runtime.sendMessage({
+    type: 'recordDownload',
+    tabId: tab.id,
+    title: (tab.title || 'recording').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80),
+  });
+  setStatus('已觸發下載（若無反應，代表尚未擷取到資料）。', 'muted');
 });
 
 render();

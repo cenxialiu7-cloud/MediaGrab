@@ -15,20 +15,52 @@
 // Media-host CDNs we request alongside a page's own origin when the user opts
 // in, so cross-origin segments (e.g. Vimeo serves sat.cool's video from
 // vimeocdn.com) are visible. The page's own origin is added dynamically.
+// Media-host CDNs requested alongside a page's own origin on opt-in, so
+// cross-origin segments are visible to webRequest. Covers the major course-video
+// hosting platforms. The page's own origin is added dynamically; for any site
+// these don't cover, the popup offers a one-click "grant broad access" upgrade.
 const KNOWN_MEDIA_HOSTS = [
-  '*://*.vimeo.com/*',        // player.vimeo.com (HLS .m3u8 manifest), captions.cloud.vimeo.com
-  '*://*.vimeocdn.com/*',
-  '*://*.akamaized.net/*',
-  '*://*.cloudfront.net/*',
-  '*://*.cdn77.com/*',
-  '*://*.bunnycdn.com/*',
-  '*://*.b-cdn.net/*',
-  '*://*.fastly.net/*'
+  '*://*.vimeo.com/*', '*://*.vimeocdn.com/*',
+  '*://*.akamaized.net/*', '*://*.akamaihd.net/*',
+  '*://*.cloudfront.net/*', '*://*.fastly.net/*',
+  '*://*.cdn77.com/*', '*://*.cdn77.org/*',
+  '*://*.wistia.com/*', '*://*.wistia.net/*', '*://*.wistia.io/*',
+  '*://*.mux.com/*',
+  '*://*.brightcove.net/*', '*://*.boltdns.net/*',
+  '*://*.kaltura.com/*',
+  '*://*.jwplayer.com/*', '*://*.jwpcdn.com/*', '*://*.jwplatform.com/*',
+  '*://*.cloudflarestream.com/*', '*://*.videodelivery.net/*',
+  '*://*.b-cdn.net/*', '*://*.bunnycdn.com/*', '*://*.mediadelivery.net/*'
 ];
 
-const MANIFEST_RE = /master\.json|\/playlist\.json|\.m3u8(\?|$)|\.mpd(\?|$)/i;
-const SEGMENT_RE  = /\/range\/prot\/|\.ts(\?|$)|\.m4s(\?|$)|[\/_-]seg(ment)?[-_\d]/i;
-const MEDIA_RE    = /\.m3u8(\?|$)|\.mpd(\?|$)|master\.json|playlist\.json|\.ts(\?|$)|\.m4s(\?|$)|\/range\/prot\/|vimeocdn\.com|\.mp4(\?|$)/i;
+// Bare domains derived from the host patterns — used to sanity-check URLs that
+// the in-page hook reports (a hostile page could forge a media message).
+const KNOWN_MEDIA_DOMAINS = KNOWN_MEDIA_HOSTS.map((p) => p.replace(/^\*:\/\/\*\./, '').replace(/\/\*$/, ''));
+function hostAllowedForTab(url, tabOrigin) {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    if (tabOrigin) { try { if (h === new URL(tabOrigin).hostname.toLowerCase()) return true; } catch {} }
+    return KNOWN_MEDIA_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
+  } catch { return false; }
+}
+
+// Generic stream patterns — no CDN names hardcoded. Content-Type matching (below)
+// complements this for manifests whose URL has no recognizable extension.
+const MANIFEST_RE = /\.m3u8(\?|$)|\.mpd(\?|$)|\.ism(\/|\?|$)|\.f4m(\?|$)|master\.json|playlist\.json/i;
+const SEGMENT_RE  = /\/range\/prot\/|\.ts(\?|$)|\.m4s(\?|$)|\.aac(\?|$)|[\/_-]seg(ment)?[-_\d]|\/frag(ment)?[-_\d]/i;
+const MEDIA_RE    = /\.m3u8(\?|$)|\.mpd(\?|$)|\.ism(\/|\?|$)|\.f4m(\?|$)|master\.json|playlist\.json|\.ts(\?|$)|\.m4s(\?|$)|\/range\/prot\/|vimeocdn\.com|\.mp4(\?|$)/i;
+
+// Content-Type → kind. Catches manifests/segments served from any host even when
+// the URL has no tell-tale extension (how all universal sniffers work). We do NOT
+// classify a bare video/mp4 by content-type alone — that matches ad/background
+// clips and floods the list; progressive .mp4 is still caught by URL pattern.
+function classifyCt(ct) {
+  if (!ct) return null;
+  ct = ct.toLowerCase();
+  if (/mpegurl|dash\+xml|\/f4m|sstr\+xml/.test(ct)) return 'manifest';
+  if (/mp2t/.test(ct)) return 'segment';
+  return null;
+}
 
 const SEG_CAP = 8000; // safety cap on stored segment URLs per tab
 
@@ -100,10 +132,15 @@ async function syncEnabledFromPermissions() {
 async function getCap(tabId) {
   const k = capKey(tabId);
   const o = await chrome.storage.session.get(k);
-  return o[k] || { manifests: [], segments: [], headers: {}, count: 0, primaryId: null, primaryManifestUrl: null };
+  return o[k] || { manifests: [], segments: [], headers: {}, count: 0, primaryId: null, primaryManifestUrl: null, drm: null, mse: null };
 }
 async function setCap(tabId, c) {
   await chrome.storage.session.set({ [capKey(tabId)]: c });
+}
+async function patchCap(tabId, patch) {
+  const c = await getCap(tabId);
+  Object.assign(c, patch);
+  await setCap(tabId, c);
 }
 
 async function updateBadge(tabId, c) {
@@ -114,76 +151,118 @@ async function updateBadge(tabId, c) {
   } catch {}
 }
 
-// Capture request headers — needs 'extraHeaders' to read Cookie/Referer.
-function onSendHeadersCapture(details) {
-  if (details.tabId < 0) return;
-  if (!MEDIA_RE.test(details.url)) return;
-  const kind = classify(details.url);
-  if (!kind) return;
+// Shared capture — records a media URL (+ optional headers) into the tab's
+// capture. Used by both webRequest listeners and the in-page fetch/XHR hook.
+async function captureUrl(tabId, url, kind, headers) {
+  if (!(await isEnabledTab(tabId))) return;             // only opted-in sites
+  const c = await getCap(tabId);
+  if (headers) c.headers = { ...c.headers, ...headers };
+  if (kind === 'manifest') {
+    const id = masterIdentity(url);
+    if (id && id !== c.primaryId) {
+      // New video's master manifest — page switched videos (e.g. SPA lesson
+      // change, no URL change). Start fresh so the download targets THIS video.
+      c.manifests = []; c.segments = [];
+      c.primaryId = id; c.primaryManifestUrl = url;
+    } else if (id && id === c.primaryId) {
+      c.primaryManifestUrl = url;                        // same video → refresh signed URL
+    }
+    if (!c.manifests.includes(url)) c.manifests.push(url);
+  } else {
+    if (c.segments.length < SEG_CAP && !c.segments.includes(url)) c.segments.push(url);
+  }
+  c.count = c.manifests.length + c.segments.length;
+  await setCap(tabId, c);
+  updateBadge(tabId, c);
+}
 
+function pickHeaders(list) {
   const hdr = {};
-  for (const h of details.requestHeaders || []) {
+  for (const h of list || []) {
     const n = h.name.toLowerCase();
     if (n === 'referer') hdr.Referer = h.value;
     else if (n === 'cookie') hdr.Cookie = h.value;
     else if (n === 'user-agent') hdr['User-Agent'] = h.value;
     else if (n === 'origin') hdr.Origin = h.value;
   }
+  return hdr;
+}
 
-  // Fire-and-forget async update (listener itself is non-blocking).
-  (async () => {
-    if (!(await isEnabledTab(details.tabId))) return;   // only opted-in sites
-    const c = await getCap(details.tabId);
-    c.headers = { ...c.headers, ...hdr };
-    if (kind === 'manifest') {
-      const id = masterIdentity(details.url);
-      if (id && id !== c.primaryId) {
-        // A new video's master manifest — the page switched videos (e.g. an SPA
-        // lesson change with no URL change). Start fresh so the download targets
-        // THIS video, not an accumulated pile from previously-viewed ones.
-        c.manifests = [];
-        c.segments = [];
-        c.primaryId = id;
-        c.primaryManifestUrl = details.url;
-      } else if (id && id === c.primaryId) {
-        c.primaryManifestUrl = details.url;   // same video → refresh signed URL
-      }
-      if (!c.manifests.includes(details.url)) c.manifests.push(details.url);
-    } else {
-      if (c.segments.length < SEG_CAP && !c.segments.includes(details.url)) c.segments.push(details.url);
-    }
-    c.count = c.manifests.length + c.segments.length;
-    await setCap(details.tabId, c);
-    updateBadge(details.tabId, c);
-  })();
+// A. Request side — capture URL (by pattern) + the request headers (Cookie/Referer/UA).
+function onSendHeadersCapture(details) {
+  if (details.tabId < 0 || !MEDIA_RE.test(details.url)) return;
+  const kind = classify(details.url);
+  if (!kind) return;
+  captureUrl(details.tabId, details.url, kind, pickHeaders(details.requestHeaders));
+}
+
+// B. Response side — capture URL by Content-Type, so manifests served from any
+// host with no tell-tale extension are still caught (headers come from A).
+function onHeadersReceivedCapture(details) {
+  if (details.tabId < 0) return;
+  let ct = '';
+  for (const h of details.responseHeaders || []) {
+    if (h.name.toLowerCase() === 'content-type') { ct = h.value || ''; break; }
+  }
+  const kind = classifyCt(ct) || (MEDIA_RE.test(details.url) ? classify(details.url) : null);
+  if (!kind) return;
+  captureUrl(details.tabId, details.url, kind, null);
 }
 
 const WR_FILTER = { urls: ['<all_urls>'] };
-const WR_EXTRA = ['requestHeaders', 'extraHeaders'];
+const WR_REQ_EXTRA = ['requestHeaders', 'extraHeaders'];
+const WR_RES_EXTRA = ['responseHeaders'];   // Content-Type is a plain header — no extraHeaders needed
 
-// Register the webRequest listener ONLY while we actually hold a host permission.
-// Registering it with zero host permissions makes Chrome warn ("You need to
-// request host permissions … webRequest") and the listener can't fire anyway.
-// With per-site opt-in, host perms arrive at runtime — so (un)register on
-// permission changes, and re-register on service-worker wake if any are granted.
+// Register the webRequest listeners ONLY while we hold a host permission.
+// Registering with zero host permissions makes Chrome warn and the listener
+// can't fire anyway. Per-site opt-in grants host perms at runtime — so
+// (un)register on permission changes and on service-worker wake.
 function hasHostPerms(perms) {
   return !!(perms && Array.isArray(perms.origins) && perms.origins.length > 0);
 }
-function ensureCaptureListener() {
-  if (!chrome.webRequest.onSendHeaders.hasListener(onSendHeadersCapture)) {
-    chrome.webRequest.onSendHeaders.addListener(onSendHeadersCapture, WR_FILTER, WR_EXTRA);
-  }
+function ensureCaptureListeners() {
+  if (!chrome.webRequest.onSendHeaders.hasListener(onSendHeadersCapture))
+    chrome.webRequest.onSendHeaders.addListener(onSendHeadersCapture, WR_FILTER, WR_REQ_EXTRA);
+  if (!chrome.webRequest.onHeadersReceived.hasListener(onHeadersReceivedCapture))
+    chrome.webRequest.onHeadersReceived.addListener(onHeadersReceivedCapture, WR_FILTER, WR_RES_EXTRA);
+}
+function removeCaptureListeners() {
+  if (chrome.webRequest.onSendHeaders.hasListener(onSendHeadersCapture))
+    chrome.webRequest.onSendHeaders.removeListener(onSendHeadersCapture);
+  if (chrome.webRequest.onHeadersReceived.hasListener(onHeadersReceivedCapture))
+    chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceivedCapture);
 }
 function syncCaptureListener() {
   chrome.permissions.getAll((perms) => {
-    if (hasHostPerms(perms)) ensureCaptureListener();
-    else if (chrome.webRequest.onSendHeaders.hasListener(onSendHeadersCapture)) {
-      chrome.webRequest.onSendHeaders.removeListener(onSendHeadersCapture);
-    }
+    if (hasHostPerms(perms)) ensureCaptureListeners();
+    else removeCaptureListeners();
   });
 }
 
-function onPermsChanged() { syncCaptureListener(); syncEnabledFromPermissions(); }
+// Inject the page hook (fetch/XHR/MSE/EME) + bridge into the sites the user
+// enabled — catches hidden manifests fetched by the player's JS and, as a last
+// resort, MSE segments that never hit the network as a manifest.
+async function syncContentScripts() {
+  const matches = (await getEnabledOrigins()).map((o) => o + '/*').filter((m) => /^https?:\/\//.test(m));
+  const ids = ['mg-inject', 'mg-bridge'];
+  try {
+    // Always clear then re-register — avoids the "update requires an existing id"
+    // trap and any half-registered state from an earlier partial failure.
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids }).catch(() => []);
+    if (existing.length) {
+      try { await chrome.scripting.unregisterContentScripts({ ids: existing.map((s) => s.id) }); } catch {}
+    }
+    if (!matches.length) return;
+    await chrome.scripting.registerContentScripts([
+      { id: 'mg-inject', matches, js: ['inject.js'], runAt: 'document_start', world: 'MAIN', allFrames: true },
+      { id: 'mg-bridge', matches, js: ['bridge.js'], runAt: 'document_start', allFrames: true },
+    ]);
+  } catch (e) {
+    console.warn('[mediagrab] content-script registration failed:', e && e.message);
+  }
+}
+
+function onPermsChanged() { syncCaptureListener(); syncEnabledFromPermissions().then(syncContentScripts); }
 
 onPermsChanged();                                        // on SW startup / wake
 chrome.permissions.onAdded.addListener(onPermsChanged);
@@ -217,10 +296,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         enabledOrigins: await getEnabledOrigins(),
       });
     } else if (msg.type === 'enableSite') {
-      if (msg.origin) await addEnabledOrigin(msg.origin);
+      if (msg.origin && /^https?:\/\//.test(msg.origin)) await addEnabledOrigin(msg.origin);
       sendResponse({ ok: true });
     } else if (msg.type === 'clearCapture') {
       await chrome.storage.session.remove(capKey(msg.tabId));
+      sendResponse({ ok: true });
+    } else if (msg.type === 'injected') {
+      // From the in-page hook (via bridge.js): hidden manifests, DRM flag, MSE bytes.
+      const tabId = _sender.tab && _sender.tab.id;
+      const p = msg.payload || {};
+      if (tabId != null && await isEnabledTab(tabId)) {
+        if (p.type === 'media' && p.url) {
+          // Guard against a hostile page forging a media URL: only accept the
+          // page's own origin or a known media CDN.
+          let tabOrigin = '';
+          try { const t = await chrome.tabs.get(tabId); tabOrigin = (t && t.url) ? new URL(t.url).origin : ''; } catch {}
+          if (hostAllowedForTab(p.url, tabOrigin)) await captureUrl(tabId, p.url, classify(p.url) || 'manifest', null);
+        }
+        else if (p.type === 'drm' && p.keySystem) await patchCap(tabId, { drm: p.keySystem });
+        else if (p.type === 'mse') await patchCap(tabId, { mse: { tracks: p.tracks || 0, bytes: p.bytes || 0, truncated: !!p.truncated } });
+      }
+      sendResponse({ ok: true });
+    } else if (msg.type === 'recordDownload') {
+      // Tell the in-page hook to assemble captured MSE segments and save them.
+      try { chrome.tabs.sendMessage(msg.tabId, { type: 'toPage', cmd: { cmd: 'recordDownload', title: msg.title } }); } catch {}
       sendResponse({ ok: true });
     } else if (msg.type === 'nativeDownload') {
       chrome.runtime.sendNativeMessage('com.mediagrab.host', msg.payload, (resp) => {

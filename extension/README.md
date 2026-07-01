@@ -33,13 +33,23 @@ chrome://extensions → 右上「開發人員模式」開 → 「載入未封裝
 3. **播放影片**幾秒，讓播放器去抓 manifest / 片段。
 4. 再開一次 popup → 按 **「用 MediaGrab 下載」**。下載會出現在 MediaGrab App 的佇列。
 
-## 運作原理（為什麼這樣才抓得到）
+## 運作原理（通用偵測，v0.2.0）
 
-- 擴充用 `webRequest` 在**你已登入的瀏覽器**裡觀察流量，**看得到 Web Worker 抓的
-  Vimeo 簽章片段**（後端 headless 掃描器看不到、也沒有你的登入）。
-- 擷取到的媒體 URL + 請求 headers（含 live session Cookie）經 **Native Messaging** 交給
-  本機 host，host 帶 `capture-token` POST 到 server `/api/capture/download`。
-- server 優先把 **manifest**（master.json / .m3u8 / .mpd）交給 yt-dlp 下載；只有片段時回 501。
+三層偵測，通用於各課程平台（Vimeo / Wistia / Mux / Brightcove / Kaltura / JW Player /
+Cloudflare Stream / Bunny…），不綁單一站：
+
+1. **webRequest**（在你已登入的瀏覽器）觀察流量，用**副檔名 + Content-Type** 比對 HLS/DASH，
+   看得到 Web Worker / 跨域 CDN 的請求。
+2. **頁面注入 hook**（`inject.js`，MAIN world）攔 `fetch`/`XHR` → 撈**播放器 JS 內請求的
+   隱藏 manifest**（現代播放器大宗）。
+3. **MSE 錄製模式**：hook `MediaSource.appendBuffer` 虹吸 segment，處理只有 `blob:`、
+   完全沒有明文 manifest 的串流（有 1.5GB 上限防記憶體爆掉）。
+4. **DRM 偵測**：hook `requestMediaKeySystemAccess`，偵測到 Widevine/PlayReady/FairPlay
+   即標示且停用下載（受保護內容無法下載）。
+
+擷取到的 manifest URL + 請求 headers（含 live session Cookie）經 **Native Messaging** 交給
+本機 host，POST 到 server `/api/capture/download`，優先交 yt-dlp 下載。錄製模式則在瀏覽器
+內組合並存檔。
 
 ## 隱私
 
