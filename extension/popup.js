@@ -28,6 +28,7 @@ function originPattern(url) {
 function pickManifest(manifests) {
   if (!manifests || !manifests.length) return null;
   const score = (u) =>
+    /wistia\.(com|net)\/(embed\/)?(iframe|medias)\/[a-z0-9]{10}/i.test(u) ? 6 : // Wistia id → yt-dlp extractor
     /player\.vimeo\.com\/external\/\d+\.m3u8/i.test(u) ? 5 :   // Vimeo HLS master
     /master\.json/i.test(u) ? 4 : /\.m3u8/i.test(u) ? 3 :
     /\.mpd/i.test(u) ? 2 : /playlist\.json/i.test(u) ? 1 : 0;

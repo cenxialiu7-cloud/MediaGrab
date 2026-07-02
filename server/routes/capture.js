@@ -16,6 +16,16 @@ import { getCaptureToken, isValidCaptureToken } from '../utils/captureToken.js';
 
 const router = Router();
 
+// Extract a Wistia 10-char hashedId from an embed/iframe/medias/config/m3u8 URL
+// (or a wmediaid query param). Used to hand yt-dlp's Wistia extractor the id form.
+function wistiaId(u) {
+  if (typeof u !== 'string') return null;
+  let m = /\/(?:iframe|medias)\/([a-z0-9]{10})(?:[./?]|$)/i.exec(u);
+  if (m && /wistia/i.test(u)) return m[1];
+  m = /[?&](?:wmediaid|wvideoid?|wvideo)=([a-z0-9]{10})/i.exec(u);
+  return m ? m[1] : null;
+}
+
 // Generate/persist the capture token at startup (not lazily) so the native
 // messaging host can read ~/.mediagrab/capture-token as soon as the app runs.
 getCaptureToken();
@@ -41,7 +51,7 @@ router.use((req, res, next) => {
  * }
  */
 router.post('/download', (req, res) => {
-  const { manifestUrl, segmentUrls, mediaType, headers, referer, title, outputDir } = req.body || {};
+  const { manifestUrl, segmentUrls, mediaType, headers, referer, title, outputDir, pageUrl } = req.body || {};
 
   const hasManifest = typeof manifestUrl === 'string' && /^https?:\/\//i.test(manifestUrl);
   const hasSegments = Array.isArray(segmentUrls) && segmentUrls.length > 0;
@@ -54,14 +64,27 @@ router.post('/download', (req, res) => {
   // master.json — so a single path covers the common cases.
   if (hasManifest) {
     const reqHeaders = headers && typeof headers === 'object' ? headers : {};
+    let dlUrl = manifestUrl;
+    let dlReferer = referer || reqHeaders.Referer || reqHeaders.referer || '';
+
+    // Wistia (Teachable/Thinkific/Kajabi/Podia course video): normalize to the
+    // id form yt-dlp's Wistia extractor accepts (NOT the .json), and force the
+    // lesson page as Referer — Wistia enforces domain restriction on the TOP
+    // page's referer, but the captured request's Referer is the wistia iframe.
+    const wid = wistiaId(manifestUrl);
+    if (wid) {
+      if (!/\.m3u8(\?|$)/i.test(manifestUrl)) dlUrl = `https://fast.wistia.com/embed/medias/${wid}`;
+      if (pageUrl && /^https?:\/\//i.test(pageUrl) && !/[\r\n]/.test(pageUrl)) dlReferer = pageUrl;
+    }
+
     const task = taskManager.createTask({
       title: title || 'Captured Video',
-      url: manifestUrl,
+      url: dlUrl,
       type: 'capture',
       mediaType: mediaType || 'manifest',
       useCapturedHeaders: true,
       headers: reqHeaders,
-      referer: referer || reqHeaders.Referer || reqHeaders.referer || '',
+      referer: dlReferer,
       outputDir: outputDir || undefined,
       startFn: (t) => ytdlp.startDownload(t),
     });

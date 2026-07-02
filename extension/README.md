@@ -53,6 +53,15 @@ node native-host/install.js
 **「用 MediaGrab 下載此 YouTube 影片」**，一鍵把網址交給 yt-dlp（最佳畫質＋音訊自動合併），
 不需授權、不需嗅探。
 
+**Teachable / Thinkific / Kajabi / Podia 等課程站（Wistia 內嵌，v0.2.2）**：這些站用
+**Wistia** 送影片，真正的串流不是常見的 `.mp4`，而是 Wistia HLS（`fast.wistia.com/embed/
+medias/{id}.m3u8`）與 `.bin` 交付檔。擴充現在會辨識 Wistia 的 10 碼 media id（從
+`embed/iframe|medias/{id}`、config、m3u8 或 `wmediaid=` 擷取），把它交給 yt-dlp 內建的
+Wistia extractor（自動挑最佳畫質、過濾縮圖／storyboard），並用**課程頁網址當 Referer**
+（Wistia 的網域限制看的是上層頁面 referer）。不再是舊版的「0 manifest／1 片段→501」。
+> ⚠️ Wistia 保護型帳號的 m3u8 會帶時效性 token（pma），擷取後請盡快下載；若帳號開了
+> 伺服器端網域限制（連對的 referer 都擋），只能靠瀏覽器端錄製（尚未實作）。
+
 ## 運作原理（通用偵測，v0.2.0）
 
 三層偵測，通用於各課程平台（Vimeo / Wistia / Mux / Brightcove / Kaltura / JW Player /

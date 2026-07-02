@@ -45,11 +45,36 @@ function hostAllowedForTab(url, tabOrigin) {
   } catch { return false; }
 }
 
+// ── Wistia (Teachable / Thinkific / Kajabi / Podia course videos) ───────────
+// Wistia's real stream is HLS at fast.wistia.com/embed/medias/{id}.m3u8 (protected
+// accounts: fast-protected.wistia.com/embed/accounts/{acct}/medias/{id}.m3u8?<pma
+// JWT>). yt-dlp ships a Wistia extractor that takes the 10-char hashedId and
+// enumerates every quality itself — so we capture the media IDENTITY (id / embed /
+// config / m3u8) and hand THAT to yt-dlp. We deliberately do NOT capture the
+// deliveries/*.bin files: each .bin is a full alternate rendition (not a fragment),
+// and a single video fires many (poster, storyboard, every quality) — capturing
+// them floods the list and mis-picks quality. Let yt-dlp do the selection.
+const WISTIA_HOST_RE = /(?:^|\.)wistia\.(?:com|net)$|embedwistia-a\.akamaihd\.net$/i;
+function wistiaId(url) {
+  try {
+    let m = /\/(?:iframe|medias)\/([a-z0-9]{10})(?:[./?]|$)/i.exec(url);
+    if (m && (WISTIA_HOST_RE.test(new URL(url).hostname) || /wistia/i.test(url))) return m[1];
+    m = /[?&](?:wmediaid|wvideoid?|wvideo)=([a-z0-9]{10})/i.exec(url);
+    if (m) return m[1];
+  } catch {}
+  return null;
+}
+// Canonical form yt-dlp's Wistia extractor accepts (NOT the .json — that suffix
+// falls through to the generic extractor). A raw .m3u8 is kept as-is elsewhere
+// (it carries the pma token + quality ladder).
+function canonicalWistia(id) { return `https://fast.wistia.com/embed/medias/${id}`; }
+
 // Generic stream patterns — no CDN names hardcoded. Content-Type matching (below)
 // complements this for manifests whose URL has no recognizable extension.
 const MANIFEST_RE = /\.m3u8(\?|$)|\.mpd(\?|$)|\.ism(\/|\?|$)|\.f4m(\?|$)|master\.json|playlist\.json/i;
 const SEGMENT_RE  = /\/range\/prot\/|\.ts(\?|$)|\.m4s(\?|$)|\.aac(\?|$)|[\/_-]seg(ment)?[-_\d]|\/frag(ment)?[-_\d]/i;
-const MEDIA_RE    = /\.m3u8(\?|$)|\.mpd(\?|$)|\.ism(\/|\?|$)|\.f4m(\?|$)|master\.json|playlist\.json|\.ts(\?|$)|\.m4s(\?|$)|\/range\/prot\/|vimeocdn\.com|\.mp4(\?|$)/i;
+const WISTIA_EMBED_RE = /wistia\.(?:com|net)\/(?:embed\/)?(?:iframe|medias)\/[a-z0-9]{10}/i;
+const MEDIA_RE    = /\.m3u8(\?|$)|\.mpd(\?|$)|\.ism(\/|\?|$)|\.f4m(\?|$)|master\.json|playlist\.json|\.ts(\?|$)|\.m4s(\?|$)|\/range\/prot\/|vimeocdn\.com|\.mp4(\?|$)|wistia\.(?:com|net)\/(?:embed\/)?(?:iframe|medias)\/[a-z0-9]{10}|[?&](?:wmediaid|wvideoid?|wvideo)=[a-z0-9]{10}/i;
 
 // Content-Type → kind. Catches manifests/segments served from any host even when
 // the URL has no tell-tale extension (how all universal sniffers work). We do NOT
@@ -66,6 +91,10 @@ function classifyCt(ct) {
 const SEG_CAP = 8000; // safety cap on stored segment URLs per tab
 
 function classify(url) {
+  // Wistia identity (embed/iframe/medias/config/m3u8) → hand the id to yt-dlp as a
+  // manifest. Checked first so a Wistia .m3u8 is still a manifest but recognized
+  // as Wistia for canonicalization/identity.
+  if (wistiaId(url)) return 'manifest';
   if (MANIFEST_RE.test(url)) return 'manifest';
   if (SEGMENT_RE.test(url)) return 'segment';
   if (/vimeocdn\.com/i.test(url)) return 'segment';      // Vimeo v2 ranged mp4 chunks
@@ -78,6 +107,8 @@ function classify(url) {
 // (sat.cool) switching lessons without changing the page URL. Variant playlists
 // (per-quality) return null so they don't count as a new video.
 function masterIdentity(url) {
+  const w = wistiaId(url);
+  if (w) return 'wistia:' + w;                            // Teachable etc. — one id per lesson
   const v = /player\.vimeo\.com\/external\/(\d+)\.m3u8/i.exec(url);
   if (v) return 'vimeo:' + v[1];
   if (/\/master\.(m3u8|mpd|json)(\?|$)/i.test(url)) {
@@ -167,6 +198,12 @@ async function captureUrl(tabId, url, kind, headers) {
   if (!(await isEnabledTab(tabId))) return;             // only opted-in sites
   const c = await getCap(tabId);
   if (headers) c.headers = { ...c.headers, ...headers };
+  // Wistia: canonicalize an embed/iframe/config URL to the id form yt-dlp accepts.
+  // Keep a raw .m3u8 as-is (it carries the pma token + full quality ladder).
+  if (kind === 'manifest' && !/\.m3u8(\?|$)/i.test(url)) {
+    const wid = wistiaId(url);
+    if (wid) url = canonicalWistia(wid);
+  }
   if (kind === 'manifest') {
     const id = masterIdentity(url);
     if (id && id !== c.primaryId) {
