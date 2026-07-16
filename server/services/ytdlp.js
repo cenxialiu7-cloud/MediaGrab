@@ -1,14 +1,16 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { taskManager } from '../utils/taskManager.js';
+import { sanitizeFilename } from '../utils/filename.js';
 import { ytdlpCookieArgs } from '../utils/cookies.js';
 
 const DEFAULT_OUTPUT = path.join(os.homedir(), 'Downloads', 'MediaGrab');
 
-export function getInfo(url) {
+export function getInfo(url, cookieArgs = ytdlpCookieArgs()) {
   return new Promise((resolve, reject) => {
-    const args = ['--dump-json', '--no-playlist', '--no-warnings', ...ytdlpCookieArgs(), url];
+    const args = ['--dump-json', '--no-playlist', '--no-warnings', ...cookieArgs, url];
     const proc = spawn('yt-dlp', args, { timeout: 30000 });
     let out = '';
     let err = '';
@@ -115,7 +117,15 @@ export function listYoutubeVideos(url) {
 
 export function startDownload(task) {
   const outputDir = task.outputDir || DEFAULT_OUTPUT;
-  const outputTemplate = path.join(outputDir, '%(title)s.%(ext)s');
+  // Prefer the source webpage title (e.g. a course-lesson name) when the caller
+  // supplied one; otherwise let yt-dlp fill in its own %(title)s. A literal name
+  // must have its % escaped as %% so yt-dlp's output template doesn't parse it.
+  let nameTpl = '%(title)s';
+  if (task.pageTitle) {
+    const safe = sanitizeFilename(task.pageTitle).replace(/%/g, '%%');
+    if (safe && safe !== 'video') nameTpl = safe;
+  }
+  const outputTemplate = path.join(outputDir, `${nameTpl}.%(ext)s`);
 
   const args = [
     '-o', outputTemplate,
@@ -131,7 +141,10 @@ export function startDownload(task) {
     // containers — the mp4-constrained default below fails with "Requested
     // format is not available". Take best video + best audio (any container),
     // fall back to best single, then remux to mp4 (no re-encode).
-    args.push('-f', 'bv*+ba/b', '--remux-video', 'mp4');
+    // --hls-prefer-native: yt-dlp's own segment downloader accepts image-wrapped
+    // / oddly-named segments (e.g. surrit's .jpeg-disguised .ts) that ffmpeg's
+    // HLS demuxer now rejects via allowed_segment_extensions.
+    args.push('-f', 'bv*+ba/b', '--remux-video', 'mp4', '--hls-prefer-native');
   } else {
     args.push('-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best');
   }
@@ -144,8 +157,9 @@ export function startDownload(task) {
     if (task.headers && typeof task.headers === 'object') {
       for (const [k, v] of Object.entries(task.headers)) {
         if (!v || k.toLowerCase() === 'referer') continue;       // referer handled above
-        // Reject header-injection: name must be a token, value must be single-line.
-        if (!/^[A-Za-z0-9-]+$/.test(k) || /[\r\n]/.test(String(v))) continue;
+        // Reject header-injection: name must be an RFC 7230 token (this now
+        // keeps auth headers with '_' / '.' e.g. x_api_key), value single-line.
+        if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(k) || /[\r\n]/.test(String(v))) continue;
         args.push('--add-header', `${k}: ${v}`);
       }
     }
@@ -153,6 +167,12 @@ export function startDownload(task) {
     // Authenticate via the configured cookie source (cookies.txt file or browser).
     // task.cookies, when present, is an explicit browser-name override.
     args.push(...ytdlpCookieArgs(task.cookies));
+  }
+
+  // Segment-only capture hands us a synthesized local playlist as a file:// URL,
+  // which yt-dlp refuses unless explicitly enabled.
+  if (typeof task.url === 'string' && task.url.startsWith('file://')) {
+    args.push('--enable-file-urls');
   }
 
   args.push(task.url);
@@ -190,6 +210,8 @@ export function startDownload(task) {
   });
 
   proc.on('close', (code) => {
+    // Clean up the temp synthesized playlist (segment-only capture), if any.
+    if (task.synthFile) { try { fs.unlinkSync(task.synthFile); } catch {} }
     if (code === 0) {
       taskManager.completeTask(task.id, task.outputPath || outputDir);
     } else if (task.status !== 'cancelled') {

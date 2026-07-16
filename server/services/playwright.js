@@ -243,11 +243,15 @@ export async function extractM3u8(episodeUrl) {
     await page.goto(episodeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(5000);
 
-    // Check for iframe player
-    const iframeSrc = await page.evaluate(() => {
-      const iframe = document.querySelector('iframe[src*="player"], iframe[src*="play"], iframe[class*="player"]');
-      return iframe ? iframe.src : null;
+    // Check for an iframe player — but SKIP ad widgets. Sites like missav embed
+    // ad iframes whose src contains "player" (e.g. campaignId=new_side_player on
+    // creative.mavrtracktor.com); picking one poisons the Referer and the real
+    // stream never authenticates. Take the first non-ad candidate.
+    const iframeCandidates = await page.evaluate(() => {
+      const els = document.querySelectorAll('iframe[src*="player"], iframe[src*="play"], iframe[class*="player"]');
+      return [...els].map(i => i.src).filter(Boolean);
     });
+    const iframeSrc = (iframeCandidates || []).find(src => !isAdMedia(src)) || null;
 
     if (iframeSrc && m3u8Entries.length === 0) {
       const iframePage = await context.newPage();
@@ -307,8 +311,9 @@ export async function extractM3u8(episodeUrl) {
       .map(c => `${c.name}=${c.value}`)
       .join('; ');
 
-    // Build the referer from the episode page or iframe
-    const referer = iframeSrc || episodeUrl;
+    // Referer for the stream request: a legit (non-ad) player iframe if we found
+    // one, else the episode page itself. Never an ad widget.
+    const referer = (iframeSrc && !isAdMedia(iframeSrc)) ? iframeSrc : episodeUrl;
     const origin = pageUrl.origin;
 
     await context.close();

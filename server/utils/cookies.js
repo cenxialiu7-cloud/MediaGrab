@@ -138,6 +138,24 @@ export function loadCookiesForPlaywright() {
 }
 
 /**
+ * Build a "name=value; ..." Cookie header for a URL from the configured
+ * cookies.txt (matching the URL's host, including parent-domain cookies).
+ * Used by the aria2 direct-download path, which can't take a browser cookie
+ * source. Returns '' when no file is configured or nothing matches.
+ */
+export function cookieHeaderForUrl(url) {
+  const cookies = loadCookiesForPlaywright();
+  if (!cookies.length) return '';
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return ''; }
+  const matched = cookies.filter(c => {
+    const d = String(c.domain || '').replace(/^\./, '').toLowerCase();
+    return d && (host === d || host.endsWith('.' + d));
+  });
+  return matched.map(c => `${c.name}=${c.value}`).join('; ');
+}
+
+/**
  * Apply the configured cookies.txt to a Playwright BrowserContext, if any.
  * Safe to call on every context — no-op when no file is configured.
  */

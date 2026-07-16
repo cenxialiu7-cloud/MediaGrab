@@ -14,6 +14,11 @@ import captureRoutes from './routes/capture.js';
 import extensionRoutes from './routes/extension.js';
 import { taskManager } from './utils/taskManager.js';
 import { stageExtension } from './utils/extensionStaging.js';
+import { prependBinToPath, maybeUpdateYtdlp } from './utils/ytdlpUpdate.js';
+
+// Prefer a user-writable, auto-updated yt-dlp over the bundled one (extractors
+// break often; the bundled binary is read-only). Must run before any download.
+prependBinToPath();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -90,4 +95,7 @@ try {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  MediaGrab Server running at http://127.0.0.1:${PORT}\n`);
+  // Refresh yt-dlp in the background (throttled to once/day). Non-blocking so it
+  // never delays startup; the fresh binary is picked up on the next launch.
+  maybeUpdateYtdlp();
 });

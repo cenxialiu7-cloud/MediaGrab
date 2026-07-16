@@ -4,15 +4,50 @@ import os from 'os';
 import fs from 'fs';
 import { taskManager } from '../utils/taskManager.js';
 import { extractM3u8, fetchInBrowserContext } from './playwright.js';
+import { sanitizeFilename } from '../utils/filename.js';
+import * as ytdlp from './ytdlp.js';
 
 const DEFAULT_OUTPUT = path.join(os.homedir(), 'Downloads', 'MediaGrab');
 const TEMP_DIR = path.join(os.tmpdir(), 'mediagrab-temp');
+
+// CDNs that gate on a real browser's TLS/JA3 fingerprint — our Playwright
+// APIRequestContext fetch gets 403, but yt-dlp's own HTTP stack passes. For
+// these, hand the extracted stream to yt-dlp (native HLS) with the page URL as
+// Referer instead of the custom segment downloader.
+const YTDLP_PREFERRED_CDN = [/(^|\.)surrit\.com$/i];
+
+function isYtdlpPreferredCdn(url) {
+  try { return YTDLP_PREFERRED_CDN.some(re => re.test(new URL(url).hostname)); }
+  catch { return false; }
+}
+
+// Delegate a download to yt-dlp reusing the browser's User-Agent + the episode
+// page as Referer (NOT the ad-iframe referer some pages expose). Reuses the
+// capture code path (bv*+ba/b, --add-header, native HLS) in ytdlp.startDownload.
+function downloadViaYtdlp(task) {
+  const h = task.headers || {};
+  const ua = h['User-Agent'] || h['user-agent'];
+  const cookie = h.Cookie || h.cookie;
+  task.url = task.m3u8Url;
+  task.useCapturedHeaders = true;
+  task.referer = task.episodeUrl || task.referer || '';
+  task.headers = {};
+  if (ua) task.headers['User-Agent'] = ua;
+  if (cookie) task.headers['Cookie'] = cookie;
+  if (!task.pageTitle) task.pageTitle = task.title;   // name file after the page title
+  taskManager.updateTask(task.id, { speed: 'Handing to yt-dlp...' });
+  return ytdlp.startDownload(task);
+}
 
 export async function downloadM3u8(task) {
   const outputDir = task.outputDir || DEFAULT_OUTPUT;
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const filename = task.filename || `${task.title || 'video'}.mp4`;
+  // Sanitize server-side: a CJK title with '/' or ':' would otherwise make
+  // path.join() create stray sub-directories or an unwritable path.
+  const rawName = (task.filename || task.pageTitle || task.title || 'video')
+    .replace(/\.(mp4|m4s|ts|mkv|webm|mov)$/i, '');
+  const filename = `${sanitizeFilename(rawName)}.mp4`;
   const outputPath = path.join(outputDir, filename);
 
   try {
@@ -41,6 +76,11 @@ export async function downloadM3u8(task) {
     if (!task.m3u8Url) {
       taskManager.failTask(task.id, 'No m3u8 URL available');
       return;
+    }
+
+    // TLS-gated CDN (e.g. surrit) → yt-dlp handles it; our fetch would 403.
+    if (isYtdlpPreferredCdn(task.m3u8Url)) {
+      return downloadViaYtdlp(task);
     }
 
     return await downloadSmart(task, outputPath);
@@ -156,6 +196,11 @@ async function downloadSmart(task, outputPath) {
       taskManager.failTask(task.id, 'No variants found in master playlist');
       return;
     }
+    // If that variant references a SEPARATE audio rendition (#EXT-X-MEDIA with
+    // its own URI), remember it so we download + mux it — otherwise the output
+    // would be video-only (the classic Reddit/Vimeo/DASH "no sound" bug).
+    const audio = pickAudioRendition(parsed, variant);
+    if (audio && audio.uri && !task.audioUrl) task.audioUrl = audio.uri;
     task.m3u8Url = variant.url;
     return downloadSmart(task, outputPath);
   }
@@ -165,8 +210,19 @@ async function downloadSmart(task, outputPath) {
     return;
   }
 
-  // Step 3: Download segments with PNG/wrapper handling
-  return await downloadSegments(task, outputPath, parsed);
+  // Step 3: download the video track and, if present, a separate audio track,
+  // then mux. When there's no separate audio this is the plain single-track path.
+  return await downloadWithOptionalAudio(task, outputPath, parsed);
+}
+
+// Choose the audio rendition to pair with a chosen video variant: the ones in
+// the variant's AUDIO group that carry their own URI (separate playlist),
+// preferring DEFAULT=YES, then AUTOSELECT=YES, then the first.
+function pickAudioRendition(parsed, variant) {
+  if (!variant || !variant.audioGroup || !parsed.audio || !parsed.audio.length) return null;
+  const inGroup = parsed.audio.filter(a => a.groupId === variant.audioGroup && a.uri);
+  if (!inGroup.length) return null;   // audio is muxed into the variant → nothing to do
+  return inGroup.find(a => a.isDefault) || inGroup.find(a => a.autoselect) || inGroup[0];
 }
 
 // Parse a BYTERANGE attribute value ("length[@offset]"). When the offset is
@@ -187,6 +243,7 @@ function parseM3u8(content, baseUrl) {
   const result = {
     isMaster: false,
     variants: [],
+    audio: [],           // #EXT-X-MEDIA TYPE=AUDIO renditions: { groupId, uri, isDefault, ... }
     segments: [],        // { url, range: {start,end,length}|null }
     initSegment: null,   // fMP4 #EXT-X-MAP → { url, range|null }
     isFmp4: false,
@@ -206,9 +263,26 @@ function parseM3u8(content, baseUrl) {
       const next = lines[i + 1];
       if (next && !next.startsWith('#')) {
         const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
+        const audioMatch = line.match(/[,:]AUDIO="([^"]+)"/);
         result.variants.push({
           url: resolveUrl(next, base),
           bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 0,
+          audioGroup: audioMatch ? audioMatch[1] : null,   // links to an #EXT-X-MEDIA group
+        });
+      }
+    } else if (line.startsWith('#EXT-X-MEDIA')) {
+      // Alternate rendition. We care about separate AUDIO tracks (the classic
+      // "video downloaded but no sound" case): a TYPE=AUDIO with its own URI is
+      // a separate playlist that must be downloaded and muxed with the video.
+      if (/TYPE=AUDIO/.test(line)) {
+        const uriMatch = line.match(/URI="([^"]+)"/);
+        result.audio.push({
+          groupId: (line.match(/GROUP-ID="([^"]+)"/) || [])[1] || '',
+          uri: uriMatch ? resolveUrl(uriMatch[1], base) : null,   // null → audio muxed in the variant
+          isDefault: /DEFAULT=YES/.test(line),
+          autoselect: /AUTOSELECT=YES/.test(line),
+          name: (line.match(/NAME="([^"]+)"/) || [])[1] || '',
+          language: (line.match(/LANGUAGE="([^"]+)"/) || [])[1] || '',
         });
       }
     } else if (line.startsWith('#EXT-X-MAP')) {
@@ -261,14 +335,54 @@ function resolveUrl(url, base) {
   }
 }
 
-async function downloadSegments(task, outputPath, parsed) {
+// Orchestrate the video track and, when the master referenced a SEPARATE audio
+// rendition, the audio track too — then mux. With no separate audio this is the
+// plain single-track path (unchanged behaviour).
+async function downloadWithOptionalAudio(task, outputPath, videoParsed) {
+  const taskDir = path.join(TEMP_DIR, task.id);
+  fs.mkdirSync(taskDir, { recursive: true });
+
+  const hasAudio = !!task.audioUrl;
+  const videoTrack = await downloadTrack(task, videoParsed, taskDir, 'video',
+    { progBase: 0, progSpan: hasAudio ? 88 : 95, allowReextract: true });
+  if (!videoTrack) { cleanupDir(taskDir); return; }   // failTask already called
+
+  let audioTrack = null;
+  if (hasAudio) {
+    const audioParsed = await fetchAndParsePlaylist(task, task.audioUrl);
+    if (audioParsed && audioParsed.segments.length > 0) {
+      taskManager.updateTask(task.id, { speed: 'Downloading audio track...' });
+      audioTrack = await downloadTrack(task, audioParsed, taskDir, 'audio',
+        { progBase: 88, progSpan: 7, allowReextract: false });
+    } else {
+      console.warn(`[m3u8] audio playlist unusable for task ${task.id}; producing video-only`);
+    }
+  }
+
+  taskManager.updateTask(task.id, { speed: 'Merging...', status: 'merging', progress: 96 });
+  if (!audioTrack) return await mergeSingle(task, taskDir, videoTrack, outputPath);
+  return await muxVideoAudio(task, taskDir, videoTrack, audioTrack, outputPath);
+}
+
+// Fetch + parse ONE media playlist (used for the separate audio rendition),
+// reusing the video track's working headers/referer.
+async function fetchAndParsePlaylist(task, url) {
+  try {
+    const r = await fetchWithRefererFallback(url, task.headers || {}, task);
+    if (!r || !r.res || r.res.status !== 200) return null;
+    return parseM3u8(r.res.body, url);
+  } catch { return null; }
+}
+
+// Download every segment (+ optional fMP4 init) of one media playlist into
+// taskDir. Returns { files, initFile, isFmp4 } or null on total failure
+// (failTask already called for the primary track).
+async function downloadTrack(task, parsed, taskDir, label, opts = {}) {
+  const { progBase = 0, progSpan = 95, allowReextract = false } = opts;
   const segments = parsed.segments;
   const encryption = parsed.encryption;
   const isFmp4 = parsed.isFmp4;
   const initSegment = parsed.initSegment;
-
-  const taskDir = path.join(TEMP_DIR, task.id);
-  fs.mkdirSync(taskDir, { recursive: true });
 
   const totalSegments = segments.length;
   const headers = task.headers || {};
@@ -326,7 +440,7 @@ async function downloadSegments(task, outputPath, parsed) {
   if (isFmp4 && initSegment) {
     try {
       const buf = await fetchPart(initSegment.url, initSegment.range);
-      initFile = path.join(taskDir, 'init.mp4');
+      initFile = path.join(taskDir, `init_${label}.mp4`);
       fs.writeFileSync(initFile, buf);
       downloadedBytes += buf.length;
     } catch (err) {
@@ -337,7 +451,7 @@ async function downloadSegments(task, outputPath, parsed) {
 
   // Process segments with concurrency
   const downloadOne = async (idx, seg, retries = 2) => {
-    const tsPath = path.join(taskDir, `seg_${String(idx).padStart(6, '0')}.${ext}`);
+    const tsPath = path.join(taskDir, `seg_${label}_${String(idx).padStart(6, '0')}.${ext}`);
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (task.status === 'cancelled') return false;
@@ -380,7 +494,7 @@ async function downloadSegments(task, outputPath, parsed) {
     if (elapsed > 0.5) {
       const speed = bytesSinceLastUpdate / elapsed;
       const speedStr = formatSpeed(speed);
-      const progress = Math.min(95, (completedCount / totalSegments) * 95);
+      const progress = progBase + Math.min(progSpan, (completedCount / totalSegments) * progSpan);
       const totalMb = (downloadedBytes / (1024 * 1024)).toFixed(1);
       const remaining = totalSegments - completedCount;
       const etaSecs = speed > 0 && completedCount > 0
@@ -391,7 +505,7 @@ async function downloadSegments(task, outputPath, parsed) {
         progress: Math.round(progress * 10) / 10,
         speed: speedStr,
         downloaded: `${totalMb} MB`,
-        eta: formatEta(etaSecs) + ` (${completedCount}/${totalSegments} segs)`,
+        eta: formatEta(etaSecs) + ` (${label} ${completedCount}/${totalSegments} segs)`,
         threads: workers.filter(Boolean).length,
       });
 
@@ -418,13 +532,11 @@ async function downloadSegments(task, outputPath, parsed) {
 
   clearInterval(updateProgress);
 
-  if (task.status === 'cancelled') {
-    cleanupDir(taskDir);
-    return;
-  }
+  if (task.status === 'cancelled') return null;
 
-  // Auto-retry failed segments with re-extracted URL once
-  if (failedSegments.length > 0 && task.episodeUrl && !task._retriedSegments) {
+  // Auto-retry failed segments with a re-extracted URL once. Only for the
+  // primary (video) track — re-extraction yields the video playlist, not audio.
+  if (allowReextract && failedSegments.length > 0 && task.episodeUrl && !task._retriedSegments) {
     task._retriedSegments = true;
     taskManager.updateTask(task.id, {
       speed: `Retrying ${failedSegments.length} failed segments...`,
@@ -446,66 +558,35 @@ async function downloadSegments(task, outputPath, parsed) {
 
   const validFiles = tsFiles.filter(Boolean);
   if (validFiles.length === 0) {
-    cleanupDir(taskDir);
-    taskManager.failTask(task.id, 'All segments failed to download');
-    return;
+    taskManager.failTask(task.id, `All ${label} segments failed to download`);
+    return null;
   }
-
   if (validFiles.length < totalSegments) {
-    console.warn(`Only ${validFiles.length}/${totalSegments} segments downloaded for task ${task.id}`);
+    console.warn(`Only ${validFiles.length}/${totalSegments} ${label} segments for task ${task.id}`);
   }
+  return { files: validFiles, initFile, isFmp4 };
+}
 
-  // Concatenate and remux with FFmpeg
-  taskManager.updateTask(task.id, {
-    speed: 'Merging segments...',
-    status: 'merging',
-    progress: 96,
+// Binary-concatenate a track's parts into one intermediate file (fMP4: init +
+// fragments; TS: raw segment concat). Returns the file path.
+async function concatTrackFile(track, taskDir, label) {
+  const out = path.join(taskDir, `track_${label}.${track.isFmp4 ? 'mp4' : 'ts'}`);
+  const ws = fs.createWriteStream(out);
+  const appendFile = (f) => new Promise((res, rej) => {
+    const rs = fs.createReadStream(f);
+    rs.on('error', rej); rs.on('end', res); rs.pipe(ws, { end: false });
   });
+  if (track.isFmp4 && track.initFile) await appendFile(track.initFile);
+  for (const f of track.files) await appendFile(f);
+  await new Promise(r => ws.end(r));
+  return out;
+}
 
-  let proc;
-  if (isFmp4) {
-    // fMP4/CMAF: the init segment + fragments are contiguous parts of one
-    // file, so a binary concat (init first) reconstructs a valid fragmented
-    // MP4. Remux with -c copy to finalize the container (no aac_adtstoasc —
-    // that bitstream filter is for MPEG-TS only).
-    const mergedRaw = path.join(taskDir, 'merged.mp4');
-    const ws = fs.createWriteStream(mergedRaw);
-    const appendFile = (f) => new Promise((res, rej) => {
-      const rs = fs.createReadStream(f);
-      rs.on('error', rej); rs.on('end', res); rs.pipe(ws, { end: false });
-    });
-    if (initFile) await appendFile(initFile);
-    for (const f of validFiles) await appendFile(f);
-    await new Promise(r => ws.end(r));
-
-    proc = spawn('ffmpeg', [
-      '-i', mergedRaw,
-      '-c', 'copy',
-      '-movflags', '+faststart',
-      '-y',
-      outputPath,
-    ]);
-  } else {
-    const concatFile = path.join(taskDir, 'concat.txt');
-    fs.writeFileSync(concatFile, validFiles.map(f => `file '${f}'`).join('\n'));
-
-    proc = spawn('ffmpeg', [
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', concatFile,
-      '-c', 'copy',
-      '-bsf:a', 'aac_adtstoasc',
-      '-movflags', '+faststart',
-      '-y',
-      outputPath,
-    ]);
-  }
-
+// Wait for an ffmpeg mux/remux; complete or fail the task; clean up temp dir.
+function finishFfmpeg(task, proc, taskDir, outputPath) {
   task.process = proc;
-
   let ffmpegErr = '';
   proc.stderr.on('data', (d) => { ffmpegErr += d.toString(); });
-
   return new Promise((resolve) => {
     proc.on('close', (code) => {
       cleanupDir(taskDir);
@@ -518,6 +599,36 @@ async function downloadSegments(task, outputPath, parsed) {
       resolve();
     });
   });
+}
+
+// Single-track finalize (audio already muxed in the video, or no audio):
+// unchanged behaviour — fMP4 binary-concat remux, or TS concat-demuxer remux.
+async function mergeSingle(task, taskDir, track, outputPath) {
+  let proc;
+  if (track.isFmp4) {
+    const mergedRaw = await concatTrackFile(track, taskDir, 'video');
+    proc = spawn('ffmpeg', ['-i', mergedRaw, '-c', 'copy', '-movflags', '+faststart', '-y', outputPath]);
+  } else {
+    const concatFile = path.join(taskDir, 'concat.txt');
+    fs.writeFileSync(concatFile, track.files.map(f => `file '${f}'`).join('\n'));
+    proc = spawn('ffmpeg', [
+      '-f', 'concat', '-safe', '0', '-i', concatFile,
+      '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart', '-y', outputPath,
+    ]);
+  }
+  return finishFfmpeg(task, proc, taskDir, outputPath);
+}
+
+// Two-track finalize: mux the separately-downloaded video + audio into one mp4
+// (-map 0:v -map 1:a -c copy). This is the fix for the "video but no sound"
+// case where the HLS master exposes a separate #EXT-X-MEDIA audio rendition.
+async function muxVideoAudio(task, taskDir, videoTrack, audioTrack, outputPath) {
+  const videoFile = await concatTrackFile(videoTrack, taskDir, 'video');
+  const audioFile = await concatTrackFile(audioTrack, taskDir, 'audio');
+  const args = ['-i', videoFile, '-i', audioFile, '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy'];
+  if (!audioTrack.isFmp4) args.push('-bsf:a', 'aac_adtstoasc');  // ADTS AAC (TS) → ASC for mp4
+  args.push('-movflags', '+faststart', '-y', outputPath);
+  return finishFfmpeg(task, spawn('ffmpeg', args), taskDir, outputPath);
 }
 
 // Robust wrapper stripper — finds MPEG-TS sync byte pattern (0x47 every 188 bytes)

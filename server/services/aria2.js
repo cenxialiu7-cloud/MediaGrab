@@ -3,6 +3,8 @@ import fetch from 'node-fetch';
 import path from 'path';
 import os from 'os';
 import { taskManager } from '../utils/taskManager.js';
+import { sanitizeWithExt } from '../utils/filename.js';
+import { cookieHeaderForUrl } from '../utils/cookies.js';
 
 const RPC_URL = 'http://localhost:6800/jsonrpc';
 const DEFAULT_OUTPUT = path.join(os.homedir(), 'Downloads', 'MediaGrab');
@@ -83,15 +85,25 @@ export async function addDownload(task) {
   };
 
   if (task.filename) {
-    options.out = task.filename;
+    options.out = sanitizeWithExt(task.filename);
   }
 
   if (task.headers) {
     options.header = Object.entries(task.headers).map(([k, v]) => `${k}: ${v}`);
   }
 
+  // Authenticate login-gated direct downloads: if the caller didn't already
+  // supply a Cookie header (e.g. from a page scan), fall back to the configured
+  // cookies.txt so a logged-in .mp4 doesn't 403.
+  const dlUrl = task.downloadUrl || task.url;
+  const hasCookie = task.headers && Object.keys(task.headers).some(k => k.toLowerCase() === 'cookie');
+  if (!hasCookie) {
+    const ck = cookieHeaderForUrl(dlUrl);
+    if (ck) options.header = [...(options.header || []), `Cookie: ${ck}`];
+  }
+
   try {
-    const gid = await rpcCall('aria2.addUri', [[task.downloadUrl || task.url], options]);
+    const gid = await rpcCall('aria2.addUri', [[dlUrl], options]);
     task.aria2Gid = gid;
     taskManager.updateTask(task.id, { aria2Gid: gid });
 

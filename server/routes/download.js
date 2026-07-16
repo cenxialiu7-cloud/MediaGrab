@@ -1,31 +1,67 @@
 import { Router } from 'express';
 import { taskManager } from '../utils/taskManager.js';
 import * as ytdlp from '../services/ytdlp.js';
+import { ytdlpCookieArgs } from '../utils/cookies.js';
 import * as m3u8Service from '../services/m3u8.js';
 import * as aria2 from '../services/aria2.js';
 
 const router = Router();
 
+// yt-dlp errors that mean "the source needs auth / has no downloadable media"
+// — for these we must NOT create a doomed task (which used to run yt-dlp again
+// and leave a few-KB ghost file, e.g. Instagram reels behind the login wall).
+const AUTH_OR_EMPTY = /login required|log ?in|requires? (a )?login|empty media response|use --cookies|cookies? (are )?required|sign in|private (video|account)|not available in your|rate[- ]?limit|restricted video|age[- ]?restrict|no video (could be )?found|account you are using/i;
+
 router.post('/start', async (req, res) => {
   try {
-    const { url, format, outputDir, cookies, type } = req.body;
+    const { url, format, outputDir, cookies, type, pageTitle } = req.body;
 
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     let info;
+    let infoErr = '';
+    let cookieChoice = cookies || null;   // browser/source used for the download
     try {
       info = await ytdlp.getInfo(url);
-    } catch {
-      info = { title: url.split('/').pop() || 'Video', formats: [] };
+    } catch (e) {
+      infoErr = (e && e.message) || '';
+      if (AUTH_OR_EMPTY.test(infoErr)) {
+        // Login-gated (e.g. Instagram): retry once WITH cookies. Prefers a
+        // configured cookies.txt, else reads the user's logged-in Chrome session.
+        const cookieArgs = ytdlpCookieArgs(cookies || 'chrome');
+        if (cookieArgs.length) {
+          try {
+            info = await ytdlp.getInfo(url, cookieArgs);
+            cookieChoice = cookies || 'chrome';   // reuse the same source for the download
+          } catch (e2) {
+            return res.status(422).json({
+              error: '此內容需要登入，且用現有 cookies 仍無法存取。請確認該瀏覽器已登入此網站（或在「設定」提供 cookies.txt），或改用瀏覽器擴充在已登入的分頁擷取。',
+              needsAuth: true,
+              detail: ((e2 && e2.message) || '').split('\n').filter(Boolean).pop() || '',
+            });
+          }
+        } else {
+          return res.status(422).json({
+            error: '此內容需要登入或無可下載媒體。請在「設定」提供 cookies（或允許讀取瀏覽器登入），或改用瀏覽器擴充在已登入的分頁擷取。',
+            needsAuth: true,
+            detail: infoErr.split('\n').filter(Boolean).pop() || '',
+          });
+        }
+      } else {
+        // Benign getInfo failure (e.g. a direct media URL yt-dlp can still fetch)
+        // — keep the optimistic fallback.
+        info = { title: url.split('/').pop() || 'Video', formats: [] };
+      }
     }
 
     const task = taskManager.createTask({
       title: info.title || 'Video Download',
+      pageTitle: (typeof pageTitle === 'string' && pageTitle.trim()) ? pageTitle.trim() : undefined,
       url,
       type: type || 'video',
       format: format || null,
       outputDir: outputDir || undefined,
-      cookies: cookies || null,
+      cookies: cookieChoice,
       thumbnail: info.thumbnail || '',
       duration: info.duration || 0,
       startFn: (t) => ytdlp.startDownload(t),

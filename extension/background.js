@@ -231,6 +231,10 @@ function pickHeaders(list) {
     else if (n === 'cookie') hdr.Cookie = h.value;
     else if (n === 'user-agent') hdr['User-Agent'] = h.value;
     else if (n === 'origin') hdr.Origin = h.value;
+    // Token-auth CDNs (some course platforms / DRM-lite APIs) require these on
+    // the segment/manifest request — forward them so the download authenticates.
+    else if (n === 'authorization') hdr.Authorization = h.value;
+    else if (n === 'x-api-key' || n === 'x-auth-token' || n === 'x-playback-session-id') hdr[h.name] = h.value;
   }
   return hdr;
 }
