@@ -1,3 +1,5 @@
+> **1.7.0 行為變更**：MSE 緩衝匯出與片段合成已移除；多資源選擇、來源憑證隔離、版本 handshake 與驗證流程見 [更新說明](../docs/RELEASE-1.7.0.md)。下方舊設計若有衝突，以 1.7.0 更新說明為準。
+
 # MediaGrab Companion 擴充 — 安裝與使用
 
 擷取「登入牆 + Web Worker 隱藏串流」這類站（例：sat.cool 的 Vimeo 影片）的串流，

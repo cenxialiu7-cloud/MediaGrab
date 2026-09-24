@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 /**
  * Stage the companion extension OUT of the read-only .app bundle so Chrome's
  * "Load unpacked" folder picker can actually reach it.
@@ -31,6 +32,7 @@ export function isPackaged() {
 // Same writable location the launcher already creates (mirrors userDataDir() in
 // server/index.js). macOS: ~/Library/Application Support/MediaGrab.
 export function userDataDir() {
+  if(process.env.MEDIAGRAB_DATA_DIR)return process.env.MEDIAGRAB_DATA_DIR;
   if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA || os.homedir(), 'MediaGrab');
   if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', 'MediaGrab');
   return path.join(os.homedir(), '.local', 'share', 'MediaGrab');
@@ -40,9 +42,10 @@ export function stagedExtensionDir() {
   return path.join(userDataDir(), 'extension');
 }
 
-function manifestVersion(dir) {
-  try { return JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8')).version || ''; }
-  catch { return null; }
+export function extensionHash(dir){
+ const hash=crypto.createHash('sha256');
+ function walk(folder,prefix=''){for(const name of fs.readdirSync(folder).sort()){const file=path.join(folder,name);const relative=prefix+name;const stat=fs.lstatSync(file);if(stat.isDirectory())walk(file,relative+'/');else if(stat.isFile()){hash.update(relative);hash.update(fs.readFileSync(file));}}}
+ try{walk(dir);return hash.digest('hex');}catch{return null;}
 }
 
 /**
@@ -68,8 +71,8 @@ export function stageExtension() {
   }
 
   try {
-    const srcVer = manifestVersion(src);
-    const destVer = manifestVersion(dest);
+    const srcVer = extensionHash(src);
+    const destVer = extensionHash(dest);
     // Up to date → DON'T touch the folder (Chrome may have it loaded; avoid a
     // pointless in-place churn / reload prompt).
     if (destHasManifest() && srcVer && srcVer === destVer) {

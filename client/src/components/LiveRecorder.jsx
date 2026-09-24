@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from '../api';
 import React, { useState } from 'react';
 
 export default function LiveRecorder({ onSwitchTab }) {

@@ -5,6 +5,7 @@
  * page's patched globals — together they cover both worlds.
  */
 (() => {
+  if(window.__mediaGrabBridge)return;window.__mediaGrabBridge=true;
   // page hook → background
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;

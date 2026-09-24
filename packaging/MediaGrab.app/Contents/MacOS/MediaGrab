@@ -41,19 +41,17 @@ if lsof -ti tcp:$PORT >/dev/null 2>&1; then
   fi
   # An older/unknown instance holds the port (e.g. you just updated) — ask it to
   # quit, then wait for the port to free so this version can take over.
-  curl -s -X POST "http://localhost:$PORT/api/quit" >/dev/null 2>&1 || true
+  CAPTURE_TOKEN="$(cat "$HOME/.mediagrab/capture-token" 2>/dev/null || true)"
+  if [ -n "$RUNNING_VERSION" ] && [ -n "$CAPTURE_TOKEN" ]; then
+    curl --max-time 3 -s -X POST -H "X-MediaGrab-Token: $CAPTURE_TOKEN" "http://localhost:$PORT/api/quit" >/dev/null 2>&1 || true
+  fi
   for i in $(seq 1 30); do
     lsof -ti tcp:$PORT >/dev/null 2>&1 || break
     sleep 0.3
   done
-  # Last resort (e.g. an old build with no /api/quit still holding the port):
-  # force-stop whatever holds the port so the update can take over.
   if lsof -ti tcp:$PORT >/dev/null 2>&1; then
-    lsof -ti tcp:$PORT | xargs kill 2>/dev/null || true
-    for i in $(seq 1 20); do
-      lsof -ti tcp:$PORT >/dev/null 2>&1 || break
-      sleep 0.3
-    done
+    osascript -e 'display alert "MediaGrab" message "連接埠仍被使用。請先在既有 MediaGrab 視窗關閉程式，再重新開啟。"' 2>/dev/null || true
+    exit 1
   fi
 fi
 

@@ -1,65 +1,66 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-
+import { getSession, resetSession, apiFetch } from "../api";
+import { useEffect, useState } from "react";
 export function useWebSocket() {
-  const wsRef = useRef(null);
-  const [tasks, setTasks] = useState([]);
-  const [connected, setConnected] = useState(false);
-  const reconnectTimer = useRef(null);
-
-  const connect = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => {
-      setConnected(false);
-      reconnectTimer.current = setTimeout(connect, 2000);
-    };
-    ws.onerror = () => ws.close();
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        handleMessage(msg);
-      } catch {}
-    };
-  }, []);
-
-  const handleMessage = useCallback((msg) => {
-    const { type, data } = msg;
-
-    setTasks(prev => {
-      switch (type) {
-        case 'task:created':
-          if (prev.find(t => t.id === data.id)) return prev;
-          return [data, ...prev];
-
-        case 'task:updated':
-          return prev.map(t => t.id === data.id ? { ...t, ...data } : t);
-
-        case 'task:removed':
-          return prev.filter(t => t.id !== data.id);
-
-        default:
-          return prev;
-      }
-    });
-  }, []);
-
+  const [tasks, setTasks] = useState([]),
+    [connected, setConnected] = useState(false);
   useEffect(() => {
+    let disposed = false,
+      ws,
+      timer;
+    async function connect() {
+      try {
+        await getSession();
+        if (disposed) return;
+        ws = new WebSocket(
+          `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`,
+        );
+        ws.onopen = () => {
+          if (disposed) return;
+          setConnected(true);
+          apiFetch("/api/download/tasks")
+            .then((r) => r.json())
+            .then((v) => {
+              if (!disposed && Array.isArray(v)) setTasks(v);
+            })
+            .catch(() => {});
+        };
+        ws.onmessage = (e) => {
+          if (disposed) return;
+          try {
+            const { type, data } = JSON.parse(e.data);
+            setTasks((prev) =>
+              type === "task:removed"
+                ? prev.filter((t) => t.id !== data.id)
+                : type === "task:created"
+                  ? [data, ...prev.filter((t) => t.id !== data.id)]
+                  : type === "task:updated"
+                    ? prev.some((t) => t.id === data.id)
+                      ? prev.map((t) =>
+                          t.id === data.id ? { ...t, ...data } : t,
+                        )
+                      : [data, ...prev]
+                    : prev,
+            );
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!disposed) {
+            setConnected(false);
+            resetSession();
+            timer = setTimeout(connect, 2000);
+          }
+        };
+        ws.onerror = () => ws.close();
+      } catch {
+        if (!disposed) timer = setTimeout(connect, 2000);
+      }
+    }
     connect();
-    fetch('/api/download/tasks')
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setTasks(data); })
-      .catch(() => {});
-
     return () => {
-      clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
+      disposed = true;
+      clearTimeout(timer);
+      ws?.close();
     };
-  }, [connect]);
-
+  }, []);
   return { tasks, setTasks, connected };
 }

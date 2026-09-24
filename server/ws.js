@@ -1,10 +1,11 @@
 import { WebSocketServer } from 'ws';
+import { authorizeWs } from './utils/security.js';
 
 let wss;
 const clients = new Set();
 
 export function setupWebSocket(server) {
-  wss = new WebSocketServer({ server, path: '/ws' });
+  wss = new WebSocketServer({ server, path: '/ws', maxPayload:4096, verifyClient:({req})=>authorizeWs(req) });
 
   wss.on('connection', (ws) => {
     clients.add(ws);

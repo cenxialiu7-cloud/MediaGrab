@@ -3,7 +3,7 @@
 ; Installs to %LOCALAPPDATA%\Programs\MediaGrab (no admin needed)
 
 #define MyAppName      "MediaGrab"
-#define MyAppVersion   "1.0.0"
+#define MyAppVersion   "1.7.0"
 #define MyAppPublisher "MediaGrab"
 #define MyAppExeName   "MediaGrab.exe"
 

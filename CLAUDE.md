@@ -48,7 +48,7 @@ companion 擴充 (MV3)  ──native messaging──►  native host (~/.mediagr
 
 ```bash
 # 前置（macOS）：實際下載需要 yt-dlp / ffmpeg 在 PATH
-brew install node git yt-dlp ffmpeg aria2
+brew install node git yt-dlp ffmpeg
 
 git clone https://github.com/cenxialiu7-cloud/MediaGrab.git
 cd MediaGrab
@@ -72,9 +72,9 @@ npm run dev          # server :9800 + vite 前端，熱重載
 ```bash
 # 1. 改版號：package.json（app）、extension/manifest.json（擴充，若擴充有改）
 # 2. commit（見下方 commit 慣例）
-# 3. 打 tag 觸發 CI（同時建 Mac arm64 + Windows x64，附到 GitHub Release）
-git tag -a v1.6.9 -m "v1.6.9 — ..." && git push origin main v1.6.9
-# 4. 監看：gh run watch <id> --exit-status ；gh release view v1.6.9
+# 3. 打 tag 觸發 CI（同時建 Mac arm64 + Windows x64，附到 GitHub Release 草稿）
+git tag -a v1.7.0 -m "v1.7.0 — ..." && git push origin main v1.7.0
+# 4. 同一提交的 Mac / Windows 全部成功後才發布草稿。監看：gh run watch <id> --exit-status ；gh release view v1.7.0
 ```
 
 - Mac tag build 只出 **arm64**（GitHub 的 Intel runner 實務上排不到）；要 Intel 手動
@@ -106,12 +106,11 @@ Podia）等；廣域模式（授 `<all_urls>` 後對任意站擷取，同 CocoCu
 ## 踩過的雷（改動前務必知道）
 
 - **擴充 staging**：`server/utils/extensionStaging.js`，production 才把 `extension/` 複製到
-  可導覽的 userData 目錄；用暫存目錄+原子 rename、版本相同不動、失敗不擋啟動。
+  可導覽的 userData 目錄；用暫存目錄+原子 rename、內容 hash 相同不動、失敗不擋啟動。
 - **新增會動系統的 POST 端點**（`/api/extension/reveal`、`/install-host`）要加 `localOnly`
   守門：**只放行 Origin 為本機**，擋跨站/sandboxed iframe(`Origin: null`)/無 Origin。
-  **但 `/api/quit` 不可加**——launcher 用 `curl`（無 Origin）呼叫它做更新接管。
-- **擷取任務必須 `type:'capture'`**，否則 `taskManager.publicTask()` 不會遮蔽 URL，
-  簽章串流 URL / referer 會經 WebSocket 外洩。
+  `/api/quit` 同樣受 session 驗證；launcher 必須帶本機 session，不能任意終止 port owner。
+- **所有任務**都由 `taskManager.publicTask()` 以 allowlist DTO 回傳，禁止原始 URL、headers、Cookie 經 API / WebSocket 外洩。
 - **Wistia（課程站）**：真串流是 `fast.wistia.com/embed/medias/{id}.m3u8` + `.bin`，不是 `.mp4`。
   擷取 10 碼 media id 交 yt-dlp 內建 Wistia extractor；正規化成 `embed/medias/{id}`（**不要**
   帶 `.json`，yt-dlp 不吃）；**強制用課程頁 pageUrl 當 Referer**（Wistia 網域限制看上層頁）；

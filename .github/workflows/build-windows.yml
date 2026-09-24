@@ -7,7 +7,7 @@ on:
       version:
         description: 'Version (e.g. 1.0.0)'
         required: true
-        default: '1.0.0'
+        default: '1.7.0'
   # Auto-run on version tags like v1.0.0
   push:
     tags: ['v*']
@@ -17,10 +17,8 @@ permissions:
   contents: write
 
 env:
-  NODE_VERSION:           '20'
-  PORTABLE_NODE_VERSION:  '20.18.0'
-  YT_DLP_URL:    'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
-  FFMPEG_URL:    'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
+  NODE_VERSION:           '24.21.0'
+  PORTABLE_NODE_VERSION:  '24.21.0'
 
 jobs:
   build:
@@ -58,12 +56,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install root deps
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Build React client
         working-directory: client
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npx vite build
 
       # ────────────────────────────────────────────────────────────────────
@@ -93,7 +91,7 @@ jobs:
           # Don't let `npm install` auto-download Chromium to the default cache;
           # we'll do that explicitly into the payload directory in a later step.
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-        run: npm install --omit=dev --omit=optional --no-audit --no-fund --no-package-lock
+        run: npm ci --omit=dev --omit=optional --no-audit --no-fund
 
       # ────────────────────────────────────────────────────────────────────
       # 4. Download portable Node.js + tool binaries
@@ -102,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $url = "https://nodejs.org/dist/v${env:PORTABLE_NODE_VERSION}/node-v${env:PORTABLE_NODE_VERSION}-win-x64.zip"
-          Invoke-WebRequest -Uri $url -OutFile node.zip
+          node scripts/download-asset.mjs node-win-x64 node.zip
           Expand-Archive node.zip -DestinationPath node-extract
           Copy-Item -Recurse -Force "node-extract\node-v${env:PORTABLE_NODE_VERSION}-win-x64\*" packaging-windows\payload\node\
           Remove-Item -Recurse -Force node-extract, node.zip
@@ -111,13 +109,13 @@ jobs:
       - name: Download yt-dlp.exe
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "$env:YT_DLP_URL" -OutFile packaging-windows\payload\bin\yt-dlp.exe
+          node scripts/download-asset.mjs ytdlp-win packaging-windows\payload\bin\yt-dlp.exe
           (Get-Item packaging-windows\payload\bin\yt-dlp.exe).Length / 1MB
 
       - name: Download ffmpeg (static, win64)
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "$env:FFMPEG_URL" -OutFile ffmpeg.zip
+          node scripts/download-asset.mjs ffmpeg-win-x64 ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-extract
           $bin = Get-ChildItem -Recurse ffmpeg-extract -Filter "ffmpeg.exe" | Select-Object -First 1
           $binDir = $bin.Directory.FullName
@@ -125,16 +123,20 @@ jobs:
           Copy-Item "$binDir\ffprobe.exe" packaging-windows\payload\bin\
           Remove-Item -Recurse -Force ffmpeg-extract, ffmpeg.zip
 
-      - name: Download aria2c (static, win64)
+      - name: Validate versions and bundled runtime
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          $url = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
-          Invoke-WebRequest -Uri $url -OutFile aria2.zip
-          Expand-Archive aria2.zip -DestinationPath aria2-extract
-          $a = Get-ChildItem -Recurse aria2-extract -Filter "aria2c.exe" | Select-Object -First 1
-          Copy-Item $a.FullName packaging-windows\payload\bin\
-          Remove-Item -Recurse -Force aria2-extract, aria2.zip
-          (Get-Item packaging-windows\payload\bin\aria2c.exe).Length / 1MB
+          npm run check:version
+          if ($LASTEXITCODE -ne 0) { throw "Version mismatch" }
+          node scripts/check-bundle.mjs packaging-windows/payload
+          if ($LASTEXITCODE -ne 0) { throw "Runtime check failed" }
+          $env:PATH = "$pwd/packaging-windows/payload/bin;$pwd/packaging-windows/payload/node;" + $env:PATH
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
+          npm sbom --omit=dev --sbom-format cyclonedx > packaging-windows/payload/app-sbom.json
+          npm --prefix client sbom --omit=dev --sbom-format cyclonedx > packaging-windows/payload/client-sbom.json
 
       # ────────────────────────────────────────────────────────────────────
       # 5. Install Playwright Chromium headless shell into payload
@@ -167,13 +169,18 @@ jobs:
           }
           Get-ChildItem $env:PLAYWRIGHT_BROWSERS_PATH | Select-Object Name, @{N='Size(MB)';E={[math]::Round((Get-ChildItem $_.FullName -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)}}
 
+      - name: Browser integration with bundled Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}\packaging-windows\payload\ms-playwright
+        run: npm run test:browser
+
       # ────────────────────────────────────────────────────────────────────
       # 6. Build the Go launcher (MediaGrab.exe)
       # ────────────────────────────────────────────────────────────────────
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.27.1'
 
       - name: Build launcher.exe (with embedded icon)
         shell: pwsh
@@ -184,7 +191,7 @@ jobs:
           cd packaging-windows\launcher
           # Embed the app icon into the .exe via a .syso resource (rsrc).
           # `go build` automatically links any *.syso in the package dir.
-          go install github.com/akavel/rsrc@latest
+          go install github.com/akavel/rsrc@v0.10.2
           $rsrc = "$(go env GOPATH)\bin\rsrc.exe"
           & $rsrc -ico "..\..\packaging\assets\icon.ico" -arch amd64 -o rsrc.syso
           go build -ldflags="-H windowsgui -s -w" -trimpath -o ..\payload\MediaGrab.exe main.go
@@ -212,7 +219,7 @@ jobs:
         shell: pwsh
         run: |
           (Get-Content packaging-windows\installer.iss) `
-            -replace '#define MyAppVersion   "1.0.0"', "#define MyAppVersion   `"${{ steps.ver.outputs.version }}`"" `
+            -replace '#define MyAppVersion\s+"[^"]+"', "#define MyAppVersion   `"${{ steps.ver.outputs.version }}`"" `
             | Set-Content packaging-windows\installer.iss
 
       - name: Compile installer with Inno Setup
@@ -244,21 +251,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Attach to GitHub Release (only on tag push)
+      # A tag may create/update a draft, but publishing requires BOTH platforms.
+      - name: Attach to draft GitHub Release (only on tag push)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
+          fail_on_unmatched_files: true
           files: packaging-windows/dist/*.exe
-          body: |
-            **MediaGrab ${{ steps.ver.outputs.version }} for Windows**
-
-            🪟 Windows 10 / 11 (x64) self-contained installer.
-            Contains Node.js, yt-dlp, ffmpeg, Playwright Chromium — no external dependencies needed.
-
-            **Installation:**
-            1. Download `MediaGrab-Setup-${{ steps.ver.outputs.version }}-win-x64.exe`
-            2. Double-click to install (may need to click "More info → Run anyway" on SmartScreen warning)
-            3. Launch from desktop or Start Menu
-            4. Browser opens automatically at http://localhost:9800
+          body_path: docs/RELEASE-1.7.0.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

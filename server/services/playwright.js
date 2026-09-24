@@ -1,3 +1,4 @@
+import {cleanHeaders,publicUrl} from '../utils/security.js';
 import { chromium } from 'playwright';
 import { applyCookiesToContext } from '../utils/cookies.js';
 
@@ -7,6 +8,7 @@ async function getBrowser() {
   if (!browser || !browser.isConnected()) {
     browser = await chromium.launch({
       headless: true,
+      ...(process.env.MEDIAGRAB_CHROME?{executablePath:process.env.MEDIAGRAB_CHROME}:{}),
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
   }
@@ -36,15 +38,18 @@ function applyStealthScripts(page) {
   });
 }
 
-export async function parseStreamingSite(url) {
+export async function parseStreamingSite(url, solution = null) {
+  await publicUrl(url);
   const b = await getBrowser();
   const context = await b.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    userAgent: solution?.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     viewport: { width: 1920, height: 1080 },
     locale: 'zh-TW',
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors: false,
   });
-  await applyCookiesToContext(context);   // authenticate login-gated sites
+  await context.route('**/*', async route => {try {await publicUrl(route.request().url());await route.continue();} catch {await route.abort();}});
+  await applyCookiesToContext(context);
+  if(solution?.cookies) await context.addCookies(solution.cookies.map(c=>({...c,sameSite:['Strict','Lax','None'].includes(c.sameSite)?c.sameSite:'Lax'})));   // authenticate login-gated sites
 
   const page = await context.newPage();
   await applyStealthScripts(page);
@@ -197,17 +202,24 @@ export async function parseStreamingSite(url) {
   }
 }
 
-export async function extractM3u8(episodeUrl) {
+export async function extractM3u8(episodeUrl, {signal} = {}) {
+  signal?.throwIfAborted();
+  await publicUrl(episodeUrl);
   const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
   const b = await getBrowser();
   const context = await b.newContext({
     userAgent: UA,
     viewport: { width: 1920, height: 1080 },
     locale: 'zh-TW',
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors: false,
   });
+  await context.route('**/*', async route => {try {await publicUrl(route.request().url());await route.continue();} catch {await route.abort();}});
   await applyCookiesToContext(context);   // authenticate login-gated sites
 
+  const abort=()=>context.close().catch(()=>{});
+  signal?.addEventListener('abort',abort,{once:true});
+  context.once('close',()=>signal?.removeEventListener('abort',abort));
+  if(signal?.aborted){await context.close();signal.throwIfAborted();}
   const page = await context.newPage();
   await applyStealthScripts(page);
 
@@ -304,19 +316,9 @@ export async function extractM3u8(episodeUrl) {
       m3u8Entries.push(...pageM3u8);
     }
 
-    // Collect cookies from the browser context
-    const cookies = await context.cookies();
     const pageUrl = new URL(episodeUrl);
-    const cookieStr = cookies
-      .map(c => `${c.name}=${c.value}`)
-      .join('; ');
-
-    // Referer for the stream request: a legit (non-ad) player iframe if we found
-    // one, else the episode page itself. Never an ad widget.
     const referer = (iframeSrc && !isAdMedia(iframeSrc)) ? iframeSrc : episodeUrl;
     const origin = pageUrl.origin;
-
-    await context.close();
 
     // Ad-network domains whose m3u8 streams are advertisements, not the real
     // video (common on sites like missav that embed video-ad widgets).
@@ -358,21 +360,23 @@ export async function extractM3u8(episodeUrl) {
     const unique = ranked.length > 0 ? ranked : [...new Set(m3u8Entries)];
     const uniqueMp4 = [...new Set(mp4Urls)];
 
-    // Build headers object
-    const headers = {
-      'User-Agent': UA,
-      'Referer': referer,
-      'Origin': origin,
-    };
-    if (cookieStr) {
-      headers['Cookie'] = cookieStr;
+    const headersByUrl = {};
+    const cookiesForMedia=[];
+    for(const url of [...unique,...uniqueMp4]) {
+      const cookies=await context.cookies([url]);
+      cookiesForMedia.push(...cookies.map(c=>({...c,hostOnly:!c.domain.startsWith('.'),expirationDate:c.expires>0?c.expires:null})));
+      headersByUrl[url]=cleanHeaders({'user-agent':UA,referer,origin,...capturedHeaders[url],cookie:cookies.map(c=>`${c.name}=${c.value}`).join('; ')});
     }
+    const headers=headersByUrl[unique[0]||uniqueMp4[0]]||{};
+    await context.close();
 
     return {
       m3u8: unique,
       mp4: uniqueMp4,
       all: [...unique, ...uniqueMp4],
       headers,
+      capturedCookies: cookiesForMedia,
+      headersByUrl,
       capturedHeaders,
     };
   } catch (err) {
@@ -429,20 +433,24 @@ function qualityHint(u) {
  * Returns { pageTitle, videos: [{ id, title, type, url, thumbnail, qualities, headers, source }] }
  */
 export async function scanPageForVideos(pageUrl) {
+  await publicUrl(pageUrl);
   const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
   const b = await getBrowser();
   const context = await b.newContext({
     userAgent: UA,
     viewport: { width: 1600, height: 900 },
     locale: 'zh-TW',
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors: false,
   });
+  await context.route('**/*', async route => {try {await publicUrl(route.request().url());await route.continue();} catch {await route.abort();}});
   await applyCookiesToContext(context);   // authenticate login-gated sites
   const page = await context.newPage();
   await applyStealthScripts(page);
 
   // url → { type, posterGuess } captured from the network
   const net = new Map();
+  const requestHeaders = new Map();
+  page.on('request', req=>{if(requestHeaders.size<2000)requestHeaders.set(req.url(),req.allHeaders().then(cleanHeaders).catch(()=>({})));});
   const note = (url, type) => {
     if (!url || isAdMedia(url)) return;
     if (!net.has(url)) net.set(url, { type });
@@ -459,18 +467,22 @@ export async function scanPageForVideos(pageUrl) {
     const ct = (res.headers()['content-type'] || '').toLowerCase();
     if (/mpegurl/.test(ct) || /\.m3u8(\?|$)/i.test(u)) note(u, 'hls');
     else if (/dash\+xml/.test(ct) || /\.mpd(\?|$)/i.test(u)) note(u, 'dash');
-    else if (ct.startsWith('video/mp4') && !looksLikeSegment(u)) note(u, 'mp4');
+    else if (/^(video|audio)\//.test(ct) && !looksLikeSegment(u)) note(u, 'mp4');
   });
 
   try {
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(5000);
 
+    // Bounded scrolling triggers common IntersectionObserver lazy players.
+    for(let i=0;i<3;i++){await page.evaluate(()=>window.scrollBy(0,window.innerHeight));await page.waitForTimeout(400);}
+    await page.evaluate(()=>window.scrollTo(0,0));
+
     // Gentle play-nudge across every frame to trigger lazy manifest loads.
     for (const frame of page.frames()) {
       try {
         await frame.evaluate(() => {
-          document.querySelectorAll('video').forEach(v => { try { v.muted = true; v.play().catch(() => {}); } catch {} });
+          document.querySelectorAll('video,audio').forEach(v => { try { v.muted = true; v.play().catch(() => {}); } catch {} });
           ['.vjs-big-play-button', '[class*="play-button"]', 'button[aria-label*="lay"]'].forEach(sel => {
             const el = document.querySelector(sel);
             if (el && el.click) try { el.click(); } catch {}
@@ -496,14 +508,14 @@ export async function scanPageForVideos(pageUrl) {
             return (h && h.textContent.trim()) || document.title || '';
           };
           const t = pickTitle();
-          document.querySelectorAll('video').forEach(v => {
+          document.querySelectorAll('video,audio').forEach(v => {
             const src = v.currentSrc || v.src;
             if (src) out.items.push({ url: src, poster: v.poster || '', title: v.title || t });
             if (v.poster) out.posters.push(v.poster);
             v.querySelectorAll('source').forEach(s => { if (s.src) out.items.push({ url: s.src, poster: v.poster || '', title: t }); });
           });
           document.querySelectorAll('source[src]').forEach(s => {
-            if (/\.(m3u8|mpd|mp4|webm)(\?|$)/i.test(s.src)) out.items.push({ url: s.src, poster: '', title: t });
+            if (/\.(m3u8|mpd|mp4|webm|mp3|m4a|wav|ogg)(\?|$)/i.test(s.src)) out.items.push({ url: s.src, poster: '', title: t });
           });
           out.titleCand = t;
           const html = document.documentElement.innerHTML;
@@ -538,14 +550,7 @@ export async function scanPageForVideos(pageUrl) {
     if (best && best.length > pageTitle.length) pageTitle = best;
     if (!pageTitle) { try { pageTitle = new URL(pageUrl).hostname; } catch {} }
 
-    // Cookies for header construction.
-    const cookies = await context.cookies();
-    const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-    const origin = (() => { try { return new URL(pageUrl).origin; } catch { return ''; } })();
-    await context.close();
-
-    const headers = { 'User-Agent': UA, 'Referer': pageUrl, 'Origin': origin };
-    if (cookieStr) headers['Cookie'] = cookieStr;
+    const headers = {'user-agent':UA,referer:pageUrl};
 
     // ── Merge all candidates ─────────────────────────────────────────────
     const candidates = [];
@@ -553,6 +558,13 @@ export async function scanPageForVideos(pageUrl) {
     candidates.push(...domVideos);
 
     const videos = groupVideos(candidates, posters[0] || '', pageTitle, headers);
+    for(const video of videos){
+      const cookies=await context.cookies([video.url]);
+      video.cookies=cookies.map(c=>({...c,hostOnly:!c.domain.startsWith('.'),expirationDate:c.expires>0?c.expires:null}));
+      video.headers=cleanHeaders({...headers,...await requestHeaders.get(video.url),cookie:cookies.map(c=>`${c.name}=${c.value}`).join('; ')});
+      for(const q of video.qualities||[]){q.headers=cleanHeaders({...headers,...await requestHeaders.get(q.url),cookie:(await context.cookies([q.url])).map(c=>`${c.name}=${c.value}`).join('; ')});}
+    }
+    await context.close();
     return { pageTitle, videos };
   } catch (err) {
     await context.close().catch(() => {});
@@ -565,7 +577,7 @@ export async function scanPageForVideos(pageUrl) {
  * HLS master + its quality variants (sharing a base path) become ONE entry;
  * progressive MP4s of the same video are grouped with selectable qualities.
  */
-function groupVideos(candidates, fallbackPoster, pageTitle, headers) {
+export function groupVideos(candidates, fallbackPoster, pageTitle, headers) {
   // Dedup by exact URL, remembering the best poster/title seen.
   const byUrl = new Map();
   for (const c of candidates) {
@@ -578,16 +590,7 @@ function groupVideos(candidates, fallbackPoster, pageTitle, headers) {
 
   // baseKey = directory up to (and including) /hls/ or the parent folder —
   // groups a master and its 1080p/720p variants together.
-  const baseKey = (u) => {
-    try {
-      const url = new URL(u);
-      let p = url.pathname;
-      const hlsIdx = p.toLowerCase().indexOf('/hls/');
-      if (hlsIdx >= 0) p = p.slice(0, hlsIdx + 5);
-      else p = p.replace(/\/[^/]*$/, '/');
-      return url.origin + p;
-    } catch { return u; }
-  };
+  const baseKey = u => u; // No relationship proof: keep distinct media.
 
   const hls = all.filter(c => c.type === 'hls');
   const dash = all.filter(c => c.type === 'dash');
@@ -640,16 +643,7 @@ function groupVideos(candidates, fallbackPoster, pageTitle, headers) {
   // Quality variants of one video often live in sibling folders
   // (…/video_1080p/faststart.mp4, …/video_720p/faststart.mp4), so normalise
   // the quality token out of the path before grouping.
-  const mp4GroupKey = (u) => {
-    try {
-      const url = new URL(u);
-      const p = url.pathname
-        .replace(/(?:^|\/)(?:video[_-]?)?\d{3,4}p(?=\/|$)/gi, '/_Q_')  // quality folder
-        .replace(/[_-]\d{3,4}p(?=[._/-]|$)/gi, '_Q_')                   // quality token
-        .replace(/\/[^/]*$/, '/');                                       // drop filename
-      return url.origin + p;
-    } catch { return baseKey(u); }
-  };
+  const mp4GroupKey = u => u;
   const mp4Groups = new Map();
   for (const c of mp4) {
     const k = mp4GroupKey(c.url);
@@ -679,79 +673,6 @@ function groupVideos(candidates, fallbackPoster, pageTitle, headers) {
   return videos;
 }
 
-// Shared browser context for downloading segments — replicates browser's TLS/IP fingerprint
-let sharedFetchContext = null;
-
-async function getSharedFetchContext() {
-  if (sharedFetchContext) return sharedFetchContext;
-  const b = await getBrowser();
-  sharedFetchContext = await b.newContext({
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    viewport: { width: 1920, height: 1080 },
-    locale: 'zh-TW',
-    // Streaming CDNs often use self-signed or non-standard certs
-    ignoreHTTPSErrors: true,
-  });
-  await applyCookiesToContext(sharedFetchContext);   // authenticated segment fetches
-  return sharedFetchContext;
-}
-
-/**
- * Fetch a URL using the Playwright browser context's HTTP client.
- * This shares the same TLS fingerprint, IP, and cookie jar as the browser
- * that originally captured the m3u8 URL — bypassing many CDN checks.
- */
-export async function fetchInBrowserContext(url, headers = {}) {
-  const ctx = await getSharedFetchContext();
-
-  const reqHeaders = {};
-  if (headers['User-Agent']) reqHeaders['user-agent'] = headers['User-Agent'];
-  if (headers['Referer'])    reqHeaders['referer']    = headers['Referer'];
-  if (headers['Origin'])     reqHeaders['origin']     = headers['Origin'];
-  if (headers['Cookie'])     reqHeaders['cookie']     = headers['Cookie'];
-
-  // Pass through any other headers
-  for (const [k, v] of Object.entries(headers)) {
-    if (!['User-Agent', 'Referer', 'Origin', 'Cookie'].includes(k)) {
-      reqHeaders[k.toLowerCase()] = v;
-    }
-  }
-
-  const response = await ctx.request.get(url, {
-    headers: reqHeaders,
-    timeout: 30000,
-    maxRedirects: 5,
-  });
-
-  const bodyBuffer = await response.body();
-  return {
-    status: response.status(),
-    headers: response.headers(),
-    body: bodyBuffer.toString('utf-8'),
-    bodyBuffer,
-  };
-}
-
-/**
- * Drop the cached segment-fetch context so the next fetch rebuilds it and
- * re-reads cookies.txt. Call when cookie settings change — otherwise the shared
- * context keeps using the cookies loaded at first creation for the whole process
- * lifetime (e.g. a re-exported, fresh session token wouldn't take effect).
- */
-export async function resetFetchContext() {
-  if (sharedFetchContext) {
-    await sharedFetchContext.close().catch(() => {});
-    sharedFetchContext = null;
-  }
-}
-
 export async function closeBrowser() {
-  if (sharedFetchContext) {
-    await sharedFetchContext.close().catch(() => {});
-    sharedFetchContext = null;
-  }
-  if (browser) {
-    await browser.close();
-    browser = null;
-  }
+ if(browser){await browser.close();browser=null;}
 }

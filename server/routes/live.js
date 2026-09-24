@@ -73,20 +73,10 @@ router.post('/record', async (req, res) => {
       duration,
       outputDir,
       headers: probe.headers || undefined,
+      startFn:t=>streamlink.recordWithYtdlp(t),
     });
 
-    taskManager.markActive(task.id);
-
-    let proc;
-    if (recorder === 'streamlink') {
-      proc = streamlink.recordStream(task);
-    } else if (recorder === 'ffmpeg') {
-      // For direct .m3u8 URLs
-      task.streamUrl = url;
-      proc = streamlink.recordWithFFmpeg(task);
-    } else {
-      proc = streamlink.recordWithYtdlp(task);
-    }
+    taskManager.processQueue();
 
     res.json({
       taskId: task.id,

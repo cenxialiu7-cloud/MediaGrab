@@ -13,7 +13,9 @@ VENDOR="$SCRIPT_DIR/vendor"
 DIST="$SCRIPT_DIR/dist"
 BUILD="$SCRIPT_DIR/build"
 
-VERSION="1.0.0"
+VERSION="$(node -p "require('$PROJECT_ROOT/package.json').version")"
+node "$PROJECT_ROOT/scripts/check-version.mjs"
+node "$PROJECT_ROOT/scripts/check-bundle.mjs" "$VENDOR"
 BUNDLE_ID="com.mediagrab.app"
 PKG_NAME="MediaGrab-${VERSION}-arm64.pkg"
 
@@ -52,7 +54,7 @@ cp -R "$PROJECT_ROOT/native-host"     "$RESOURCES/app/native-host"
 # Install only PRODUCTION dependencies into the bundle (smaller than copying full node_modules)
 echo "  Installing production deps..."
 cd "$RESOURCES/app"
-"$VENDOR/node/bin/npm" install --omit=dev --omit=optional --no-audit --no-fund --silent
+"$VENDOR/node/bin/npm" ci --omit=dev --omit=optional --no-audit --no-fund --silent
 # Drop playwright's bundled browsers (we provide our own at ms-playwright/) and dev-only stuff
 rm -rf node_modules/playwright/.local-browsers 2>/dev/null || true
 rm -rf node_modules/playwright-core/.local-browsers 2>/dev/null || true

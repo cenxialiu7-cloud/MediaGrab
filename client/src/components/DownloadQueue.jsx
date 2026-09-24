@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from '../api';
 import React, { useState } from 'react';
 import DownloadItem from './DownloadItem';
 import AdSlot from './AdSlot';
@@ -28,11 +29,11 @@ export default function DownloadQueue({ tasks, disableAds = false }) {
     );
   }
 
-  const active = tasks.filter(t => ['downloading', 'merging'].includes(t.status));
+  const active = tasks.filter(t => ['downloading', 'merging', 'verifying'].includes(t.status));
   const queued = tasks.filter(t => t.status === 'queued');
   const paused = tasks.filter(t => t.status === 'paused');
   const completed = tasks.filter(t => t.status === 'completed');
-  const failed = tasks.filter(t => ['error', 'cancelled'].includes(t.status));
+  const failed = tasks.filter(t => ['error', 'cancelled', 'incomplete'].includes(t.status));
   const finishedCount = completed.length + failed.length;
 
   return (

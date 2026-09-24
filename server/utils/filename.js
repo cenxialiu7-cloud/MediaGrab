@@ -28,9 +28,11 @@ export function sanitizeFilename(name, { maxLen = 150, used } = {}) {
   // Truncate by code point so surrogate pairs / CJK never split.
   const cp = [...s];
   if (cp.length > maxLen) s = cp.slice(0, maxLen).join('').trim().replace(/[. ]+$/g, '');
+  while (Buffer.byteLength(s,'utf8') > 180) s = [...s].slice(0,-1).join('');
 
+  s = s.replace(/[. ]+$/g, '');
   if (!s) s = 'video';
-  else if (WIN_RESERVED.test(s)) s = `_${s}`;
+  else if (WIN_RESERVED.test(s.split('.')[0])) s = `_${s}`;
 
   if (used) {
     const base = s;

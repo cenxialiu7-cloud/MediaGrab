@@ -1,3 +1,5 @@
+import VersionInfo from './components/VersionInfo';
+import { apiFetch as fetch } from './api';
 import React, { useState, useEffect } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
 import SmartInput from './components/SmartInput';
@@ -28,7 +30,7 @@ export default function App() {
   const handleQuit = async () => {
     if (!window.confirm('關閉 MediaGrab？進行中的下載會停止。\nQuit MediaGrab? In-progress downloads will stop.')) return;
     setQuitting(true);
-    try { await fetch('/api/quit', { method: 'POST' }); } catch {}
+    try { await fetch('/api/quit', { method: 'POST' }); } catch(e) {setQuitting(false);window.alert(e.message);}
   };
 
   // Backwards-compat shim — old child components call onSwitchTab('download')
@@ -51,7 +53,7 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  const activeTasks = tasks.filter(t => t.status === 'downloading' || t.status === 'merging');
+  const activeTasks = tasks.filter(t => ['downloading','merging','verifying'].includes(t.status));
   const globalSpeed = activeTasks.reduce((sum, t) => {
     const match = (t.speed || '').match(/([\d.]+)\s*(MB|KB|GB|B)/i);
     if (!match) return sum;
@@ -78,11 +80,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-dark-900 text-white">
       <header className="bg-dark-800 border-b border-dark-600 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="max-w-6xl mx-auto flex flex-wrap gap-4 items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-3xl">📥</span>
             <div>
-              <h1 className="text-xl font-bold">MediaGrab</h1>
+              <h1 className="text-xl font-bold">MediaGrab</h1><VersionInfo />
               <p className="text-xs text-dark-200">通用影音下載器 · Universal Video Downloader</p>
             </div>
           </div>
@@ -115,12 +117,12 @@ export default function App() {
       <SponsorBar disableAds={settings.disableAds} />
 
       <nav className="bg-dark-800 border-b border-dark-700">
-        <div className="max-w-6xl mx-auto flex">
+        <div className="max-w-6xl mx-auto flex overflow-x-auto">
           {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
+              className={`shrink-0 px-6 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === tab.id
                   ? 'border-accent text-accent'
                   : 'border-transparent text-dark-200 hover:text-white hover:border-dark-400'

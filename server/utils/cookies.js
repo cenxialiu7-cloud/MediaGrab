@@ -1,3 +1,4 @@
+import { DATA_DIR } from './config.js';
 /**
  * Shared cookie configuration — single source of truth for "logged-in" downloads.
  *
@@ -20,7 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const SETTINGS_FILE = path.join(os.homedir(), '.mediagrab', 'settings.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 const VALID_BROWSERS = new Set(['chrome', 'firefox', 'safari', 'edge', 'brave', 'chromium', 'opera', 'vivaldi']);
 
@@ -101,8 +102,9 @@ export function parseNetscapeCookies(text) {
     const parts = line.split('\t');
     if (parts.length < 7) continue;
 
-    const [domain, , cookiePath, secure, expiry, name, ...valueParts] = parts;
+    const [rawDomain, includeSubdomains, cookiePath, secure, expiry, name, ...valueParts] = parts;
     const value = valueParts.join('\t'); // value may legitimately contain tabs? keep safe
+    const domain = includeSubdomains === 'TRUE' ? '.' + rawDomain.replace(/^\./, '') : rawDomain.replace(/^\./, '');
     if (!domain || !name) continue;
 
     const expires = Number(expiry);
@@ -148,9 +150,14 @@ export function cookieHeaderForUrl(url) {
   if (!cookies.length) return '';
   let host;
   try { host = new URL(url).hostname.toLowerCase(); } catch { return ''; }
+  const target = new URL(url);
+  const now = Date.now()/1000;
   const matched = cookies.filter(c => {
     const d = String(c.domain || '').replace(/^\./, '').toLowerCase();
-    return d && (host === d || host.endsWith('.' + d));
+    const domainOk = c.domain.startsWith('.') ? (host === d || host.endsWith('.'+d)) : host === d;
+    const p = c.path || '/';
+    const pathOk = target.pathname === p || (target.pathname.startsWith(p) && (p.endsWith('/') || target.pathname[p.length] === '/'));
+    return domainOk && pathOk && (!c.secure || target.protocol === 'https:') && (c.expires < 0 || c.expires > now);
   });
   return matched.map(c => `${c.name}=${c.value}`).join('; ');
 }

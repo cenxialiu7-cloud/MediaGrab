@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from '../api';
 import React, { useState, useEffect } from 'react';
 import AdSlot from './AdSlot';
 import { VPN_OFFERS, SUPPORT_LINKS, getActiveClickOffers, pickClickOffer, withUtm } from '../monetization';
@@ -26,6 +27,8 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
   useEffect(() => {
     fetch('/api/extension/info').then(r => r.json()).then(setExtInfo).catch(() => {});
   }, []);
+
+  useEffect(()=>{if(parentSettings?.outputDir)setSettings(parentSettings);},[parentSettings]);
 
   const copy = (text, key) => {
     navigator.clipboard?.writeText(text).then(() => {
@@ -138,7 +141,7 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
             />
             <p className="text-xs text-dark-400 mt-1">
               用瀏覽器擴充（如「Get cookies.txt LOCALLY」）匯出 Netscape 格式 cookies.txt，填入路徑。
-              這是唯一能讓「登入後才看得到的串流／課程影片」下載的方式（同時餵 yt-dlp 與內建串流引擎）。
+              可供解析器使用；也可直接在已登入的 Chrome 分頁使用 MediaGrab 擴充擷取完整串流。
               <br />
               <span className="opacity-70">Export a Netscape cookies.txt from your logged-in browser; this is what unlocks login-gated streaming / course videos.</span>
             </p>
@@ -157,11 +160,15 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
               <option value="edge">Edge</option>
             </select>
             <p className="text-xs text-dark-400 mt-1">
-              直接讀取瀏覽器 cookie，免匯出檔案，但只對 yt-dlp 支援的站（YouTube／FB／IG…）有效，串流／課程站請改用上方 cookies.txt。
+              直接讀取瀏覽器 cookie，免匯出檔案，但只對 yt-dlp 支援的站（YouTube／FB／IG…）有效，串流／課程站可使用上方 cookies.txt 或 MediaGrab 擴充。
               若同時設定，以 cookies.txt 優先。
             </p>
           </div>
 
+          <label className="flex gap-3 items-start p-3 bg-dark-700 rounded-lg">
+            <input type="checkbox" checked={!!settings.autoUpdateEngine} onChange={e=>setSettings(s=>({...s,autoUpdateEngine:e.target.checked}))} />
+            <span className="text-sm">啟動時檢查 yt-dlp 更新<span className="block text-xs text-dark-300">下載官方版本、檢查 SHA-256 與可執行性後保存；下次啟動生效，保留上一版。</span></span>
+          </label>
           {/* Disable Ads toggle — important for ePrivacy compliance */}
           <div className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
             <div className="flex-1">
@@ -210,6 +217,11 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
           <br /><span className="text-dark-400">Capture login-gated / worker-hidden streams from your logged-in browser and download them here.</span>
         </p>
 
+        <div className="text-xs text-dark-300 mb-4">
+          <p>隨附 v{extInfo.bundledVersion} · 磁碟 v{extInfo.stagedVersion}</p>
+          <p>{extInfo.lastHandshake ? `最近連線：外掛 v${extInfo.lastHandshake.extensionVersion} · Host v${extInfo.lastHandshake.hostVersion} · ${new Date(extInfo.lastHandshake.seenAt).toLocaleString()}` : '尚未收到外掛連線；請重新載入外掛並開啟其視窗。'}</p>
+          <button onClick={refreshExtInfo} className="mt-2 text-accent">重新檢查版本</button>
+        </div>
         <div className="space-y-4">
           <div>
             <div className="text-sm font-medium mb-1">1. 安裝 native 橋接（一次性）· Install native host</div>
@@ -269,7 +281,8 @@ export default function Settings({ deps, settings: parentSettings, onSettingsCha
           {[
             { key: 'yt-dlp', name: 'yt-dlp', desc: '核心影片下載引擎 · Core video downloader', install: 'pip install yt-dlp' },
             { key: 'ffmpeg', name: 'FFmpeg', desc: '影片處理與合併 · Video processing & merging', install: 'brew install ffmpeg' },
-            { key: 'aria2c', name: 'aria2', desc: '多線程下載器 · Multi-threaded downloader', install: 'brew install aria2' },
+            { key: 'ffprobe', name: 'ffprobe', desc: '輸出影音完整性檢查', install: 'brew install ffmpeg' },
+            {key:'node',name:'Node 24+',desc:'YouTube JS runtime',install:'brew install node'},
           ].map(dep => (
             <div key={dep.key} className="flex items-center justify-between p-3 bg-dark-700 rounded-lg">
               <div className="flex items-center gap-3">

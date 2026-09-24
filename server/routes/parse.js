@@ -1,3 +1,5 @@
+import {safeError} from '../utils/security.js';
+import {publicResource} from '../utils/resources.js';
 import { Router } from 'express';
 import * as playwright from '../services/playwright.js';
 import * as flaresolverr from '../services/flaresolverr.js';
@@ -21,7 +23,7 @@ router.post('/probe', async (req, res) => {
     const result = await probeUrl(url);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -34,7 +36,7 @@ router.post('/youtube-list', async (req, res) => {
     const result = await ytdlp.listYoutubeVideos(url);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -51,7 +53,7 @@ router.post('/streaming', async (req, res) => {
       if (flareAvailable) {
         try {
           const solution = await flaresolverr.solveChallenge(url);
-          result = await playwright.parseStreamingSite(url);
+          result = await playwright.parseStreamingSite(url, solution);
         } catch (flareErr) {
           throw new Error(`Both direct and FlareSolverr attempts failed: ${err.message}`);
         }
@@ -62,7 +64,7 @@ router.post('/streaming', async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -74,10 +76,8 @@ router.post('/scan-page', async (req, res) => {
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
     const result = await playwright.scanPageForVideos(url);
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json({pageTitle:result.pageTitle,videos:result.videos.map(publicResource)});
+  } catch (err) { res.status(500).json({ error: safeError(err) }); }
 });
 
 router.post('/extract-m3u8', async (req, res) => {
@@ -94,10 +94,8 @@ router.post('/extract-m3u8', async (req, res) => {
       });
     }
 
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    res.json({resources:result.all.map((url,i)=>publicResource({id:String(i),url,headers:result.headersByUrl?.[url],type:result.m3u8.includes(url)?'hls':'mp4'}))});
+  } catch (err) { res.status(500).json({ error: safeError(err) }); }
 });
 
 router.post('/batch-extract', async (req, res) => {
@@ -115,10 +113,7 @@ router.post('/batch-extract', async (req, res) => {
           title: ep.title,
           url: ep.url,
           episodeUrl: ep.url,        // store episode page URL for lazy re-extraction
-          m3u8: result.m3u8[0] || null,
-          mp4: result.mp4[0] || null,
-          allStreams: result.all,
-          headers: result.headers || {},
+          resources:result.all.map((url,i)=>publicResource({id:String(i),url,headers:result.headersByUrl?.[url],title:ep.title,type:result.m3u8.includes(url)?'hls':'mp4'})),
           success: result.all.length > 0,
         });
       } catch (err) {
@@ -127,14 +122,14 @@ router.post('/batch-extract', async (req, res) => {
           url: ep.url,
           m3u8: null,
           success: false,
-          error: err.message,
+          error: safeError(err),
         });
       }
     }
 
     res.json({ results, successCount: results.filter(r => r.success).length });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -168,23 +163,23 @@ router.post('/detect', async (req, res) => {
 
     for (const p of directPlatforms) {
       if (p.pattern.test(urlLower)) {
-        return res.json({ platform: p.name, method: p.method, supported: true });
+        return res.json({ platform: p.name, method: p.method, supported: 'candidate' });
       }
     }
 
     for (const s of streamingSites) {
       if (s.pattern.test(urlLower)) {
-        return res.json({ platform: s.name, method: s.method, supported: true });
+        return res.json({ platform: s.name, method: s.method, supported: 'candidate' });
       }
     }
 
     if (urlLower.includes('.m3u8')) {
-      return res.json({ platform: 'Direct M3U8', method: 'm3u8', supported: true });
+      return res.json({ platform: 'Direct M3U8', method: 'm3u8', supported: 'candidate' });
     }
 
-    res.json({ platform: 'Unknown', method: 'auto', supported: true, note: 'Will try yt-dlp first, then streaming parser' });
+    res.json({ platform: 'Unknown', method: 'auto', supported: 'candidate', note: 'Will try yt-dlp first, then streaming parser' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

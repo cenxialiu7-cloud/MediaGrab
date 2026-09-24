@@ -44,26 +44,22 @@ func main() {
 		}
 		// Older/unknown instance holds the port (e.g. you just updated) — ask it
 		// to quit, then wait for the port to free so this version takes over.
-		http.Post("http://localhost:"+port+"/api/quit", "application/json", nil)
+        home, _ := os.UserHomeDir()
+        token, _ := os.ReadFile(filepath.Join(home, ".mediagrab", "capture-token"))
+        if len(token) > 0 && runningVersion() != "" {
+            req, _ := http.NewRequest("POST", "http://localhost:"+port+"/api/quit", nil)
+            req.Header.Set("X-MediaGrab-Token", strings.TrimSpace(string(token)))
+            client := http.Client{Timeout: 3*time.Second}
+            if resp, err := client.Do(req); err == nil { resp.Body.Close() }
+        }
 		for i := 0; i < 30; i++ {
 			if !pingServer() {
 				break
 			}
 			time.Sleep(300 * time.Millisecond)
 		}
-		// Last resort (e.g. an old build with no /api/quit still holding the
-		// port): force-stop the recorded server process so the update can start.
-		if pingServer() {
-			if b, err := os.ReadFile(pidPath); err == nil {
-				exec.Command("taskkill", "/PID", strings.TrimSpace(string(b)), "/F").Run()
-				for i := 0; i < 20; i++ {
-					if !pingServer() {
-						break
-					}
-					time.Sleep(300 * time.Millisecond)
-				}
-			}
-		}
+        if pingServer() { fatal("MediaGrab port is still busy. Quit the existing app before starting this version.") }
+
 	}
 
 	// Build env for child Node process

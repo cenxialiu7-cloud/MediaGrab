@@ -1,8 +1,11 @@
+import { apiFetch as fetch } from '../api';
 import React from 'react';
 
 const STATUS_CONFIG = {
   queued:      { label: '等待中 Queued',      color: 'text-dark-300',  bg: 'bg-dark-500' },
   downloading: { label: '下載中 Downloading', color: 'text-accent',    bg: 'bg-accent' },
+  verifying: {label:'驗證中 Verifying',color:'text-yellow-400',bg:'bg-yellow-500'},
+  incomplete: {label:'部分檔案 Incomplete',color:'text-orange-400',bg:'bg-orange-500'},
   merging:     { label: '合併中 Merging',     color: 'text-yellow-400',bg: 'bg-yellow-500' },
   paused:      { label: '已暫停 Paused',      color: 'text-yellow-400',bg: 'bg-yellow-500' },
   completed:   { label: '已完成 Completed',   color: 'text-green-400', bg: 'bg-green-500' },
@@ -23,7 +26,7 @@ export default function DownloadItem({ task }) {
     extracting: { label: '解析中 Extracting', color: 'text-blue-400', bg: 'bg-blue-500' },
   };
   const config = EXTRA_CONFIG[displayStatus] || STATUS_CONFIG[task.status] || STATUS_CONFIG.queued;
-  const isActive = task.status === 'downloading' || task.status === 'merging';
+  const isActive = ['downloading','merging','verifying'].includes(task.status);
   const isPaused = task.status === 'paused';
 
   const handleAction = async (action) => {
@@ -58,7 +61,7 @@ export default function DownloadItem({ task }) {
             {config.label}
           </span>
           <div className="flex gap-1">
-            {isActive && (
+            {isActive && task.type !== 'live' && (
               <button onClick={() => handleAction('pause')}
                 className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="Pause">
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -118,15 +121,15 @@ export default function DownloadItem({ task }) {
         </>
       )}
 
-      {task.status === 'completed' && (
+      {['completed','incomplete'].includes(task.status) && (
         <div className="text-xs text-green-400 mt-1">
           已儲存 Saved: {task.outputPath || '下載完成'}
         </div>
       )}
 
-      {task.status === 'error' && (
+      {['error','incomplete'].includes(task.status) && (
         <div className="text-xs text-red-400 mt-1 truncate" title={task.error}>
-          {task.error}
+          {task.error}{task.suggestion && <span className="block mt-1">{task.suggestion}</span>}
         </div>
       )}
     </div>

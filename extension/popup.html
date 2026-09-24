@@ -37,7 +37,7 @@
     <button id="enableBtn" class="ghost" style="display:none; width:100%;">允許在此站擷取影片</button>
 
     <div id="youtubeBox" style="display:none;">
-      <div class="muted" style="margin-bottom:6px;">🎬 偵測到 YouTube 影片 — 可直接交給 MediaGrab（yt-dlp）下載最佳畫質＋音訊，無需授權。</div>
+      <div class="muted" style="margin-bottom:6px;">🎬 偵測到 YouTube 影片 — 可直接交給 MediaGrab（yt-dlp）下載最佳畫質＋音訊，使用 App 已設定的登入來源。</div>
       <button id="ytBtn" class="primary" style="margin-top:0;">用 MediaGrab 下載此 YouTube 影片</button>
     </div>
 
@@ -57,10 +57,8 @@
 
       <button id="downloadBtn" class="primary" disabled>用 MediaGrab 下載</button>
 
-      <div id="mseSection" style="display:none; margin-top:8px;">
-        <div class="muted">🎬 錄製模式：已擷取 <span id="mseBytes">0</span>（無明文 manifest 的串流）。需邊播放邊擷取，從頭播放可錄完整。</div>
-        <button id="recordBtn" class="ghost" style="width:100%; margin-top:6px;">下載（錄製模式）</button>
-      </div>
+      <div id="mseSection" hidden><span id="mseBytes"></span><button id="recordBtn" disabled>緩衝片段保存已停用</button></div>
+      <p class="muted">沒有完整播放清單、DRM 或官方限制的內容，請使用平台提供的離線功能。</p>
 
       <button id="broadBtn" class="ghost" style="display:none; width:100%; margin-top:8px; font-size:12px;">在此站抓不到？授予廣域權限再試</button>
 

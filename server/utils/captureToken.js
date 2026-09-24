@@ -1,3 +1,4 @@
+import { DATA_DIR } from './config.js';
 /**
  * Shared secret for the companion-extension capture endpoint.
  *
@@ -12,7 +13,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 
-const TOKEN_FILE = path.join(os.homedir(), '.mediagrab', 'capture-token');
+const TOKEN_FILE = path.join(DATA_DIR, 'capture-token');
 
 let cached = null;
 

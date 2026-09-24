@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from '../api';
 import React, { useState } from 'react';
 
 // Detect what kind of URL this is

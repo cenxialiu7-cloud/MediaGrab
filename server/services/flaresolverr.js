@@ -1,11 +1,11 @@
-import fetch from 'node-fetch';
+
 
 const FLARESOLVERR_URL = process.env.FLARESOLVERR_URL || 'http://localhost:8191/v1';
 
 export async function isAvailable() {
   try {
-    const res = await fetch(FLARESOLVERR_URL, { method: 'POST', timeout: 3000 });
-    return true;
+    const res = await fetch(FLARESOLVERR_URL, { method: 'POST', signal: AbortSignal.timeout(3000) });
+    return res.ok;
   } catch {
     return false;
   }
@@ -30,7 +30,7 @@ export async function solveChallenge(url, options = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    timeout: 90000,
+    signal: AbortSignal.timeout(90000),
   });
 
   const data = await res.json();
@@ -59,7 +59,7 @@ export async function solvePost(url, postData, options = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    timeout: 90000,
+    signal: AbortSignal.timeout(90000),
   });
 
   const data = await res.json();

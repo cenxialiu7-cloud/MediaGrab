@@ -1,0 +1,29 @@
+{
+  "policy": "只加入公開可驗證或已授權樣本；不得把簽章網址、Cookie 或帳號憑證提交到 Git。metadata_only 不等於下載或播放驗收。",
+  "platforms": [
+    {
+      "platform": "YouTube",
+      "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      "checkedAt": "2026-09-24",
+      "status": "metadata_only",
+      "formats": 24
+    },
+    {
+      "platform": "Vimeo",
+      "url": "https://vimeo.com/1581823",
+      "checkedAt": "2026-09-24",
+      "status": "failed_http_404"
+    },
+    { "platform": "Facebook", "status": "awaiting_authorized_sample" },
+    { "platform": "Instagram", "status": "awaiting_authorized_sample" },
+    { "platform": "TikTok", "status": "awaiting_authorized_sample" },
+    { "platform": "Douyin", "status": "awaiting_authorized_sample" },
+    { "platform": "Gimy", "status": "awaiting_authorized_sample" },
+    { "platform": "小鴨", "status": "awaiting_authorized_sample" },
+    { "platform": "MissAV", "status": "awaiting_authorized_sample" },
+    {
+      "platform": "教育課程／Wistia／Vimeo embed",
+      "status": "awaiting_authorized_sample"
+    }
+  ]
+}

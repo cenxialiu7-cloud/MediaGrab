@@ -17,7 +17,8 @@ import os from 'os';
 import path from 'path';
 import http from 'http';
 
-const TOKEN_FILE = path.join(os.homedir(), '.mediagrab', 'capture-token');
+const HOST_VERSION=JSON.parse(fs.readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
+const TOKEN_FILE = path.join(process.env.MEDIAGRAB_DATA_DIR||path.join(os.homedir(),'.mediagrab'), 'capture-token');
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.MEDIAGRAB_PORT) || 9800;
 
@@ -64,7 +65,8 @@ async function handle(msg) {
   if (!msg || typeof msg !== 'object') return sendMessage({ ok: false, error: 'bad message' });
 
   if (msg.type === 'ping') {
-    return sendMessage({ type: 'pong', serverUp: await serverUp() });
+    const r=await serverRequest('POST','/api/capture/hello',{extensionVersion:msg.extensionVersion,hostVersion:HOST_VERSION});
+    return sendMessage({ type:'pong',ok:r.status===200,serverUp:r.status===200,hostVersion:HOST_VERSION,appVersion:r.body?.appVersion });
   }
 
   if (msg.type === 'download') {
@@ -87,6 +89,7 @@ process.stdin.on('data', (chunk) => {
   buf = Buffer.concat([buf, chunk]);
   while (buf.length >= 4) {
     const len = buf.readUInt32LE(0);
+    if(len>2*1024*1024){sendMessage({ok:false,error:'Message too large'});process.exit(1);}
     if (buf.length < 4 + len) break;
     const json = buf.subarray(4, 4 + len).toString('utf8');
     buf = buf.subarray(4 + len);

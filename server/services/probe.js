@@ -1,3 +1,5 @@
+import {platformFor} from '../utils/platforms.js';
+import {publicUrl} from '../utils/security.js';
 /**
  * Universal URL probe — classifies any pasted URL into a kind + recommended action.
  *
@@ -68,7 +70,7 @@ function isSingleVideoSite(url) {
 }
 
 function isDirectMediaUrl(url) {
-  return /\.(m3u8|mp4|webm|mov|mkv|flv|ts)(\?|$)/i.test(url);
+  return /\.(m3u8|mpd|mp4|webm|mov|mkv|mp3|m4a|ogg|wav)(\?|$)/i.test(url);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -77,7 +79,7 @@ function isDirectMediaUrl(url) {
 function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const args = [
-      '-J',                  // --dump-single-json
+      '--ignore-config', '--js-runtimes', `node:${process.execPath}`, '-J',                  // --dump-single-json
       '--no-warnings',
       '--skip-download',
       '--socket-timeout', '10',
@@ -85,10 +87,10 @@ function ytdlpProbe(url, { flatPlaylist = true, timeoutMs = 30000 } = {}) {
       // fileOnly: a cookies.txt read is instant, but --cookies-from-browser does a
       // cold read of the whole browser cookie DB that can exceed the 15s probe
       // budget and spuriously fail a public probe. Downloads use the full source.
-      ...ytdlpCookieArgs(undefined, { fileOnly: true }),
+      ...ytdlpCookieArgs(),
     ];
     if (flatPlaylist) args.push('--flat-playlist');
-    args.push(url);
+    args.push('--',url);
 
     const proc = spawn('yt-dlp', args);
     let out = '';
@@ -214,6 +216,7 @@ function classifyYtdlp(data, originalUrl) {
 export async function probeUrl(rawUrl) {
   const url = (rawUrl || '').trim();
   if (!url) throw new Error('URL is required');
+  await publicUrl(url);
 
   // Streaming aggregator — don't even try yt-dlp, defer to Playwright parser
   if (isAggregator(url)) {
@@ -260,7 +263,7 @@ export async function probeUrl(rawUrl) {
     // 30s: the bundled yt-dlp binary's first (cold) YouTube extraction can take
     // ~20s while it fetches+caches the player JS; 15s fell through to the scanner.
     const data = await ytdlpProbe(url, { flatPlaylist: true, timeoutMs: 30000 });
-    return classifyYtdlp(data, url);
+    return {...classifyYtdlp(data,url),platform:platformFor(url)};
   } catch (err) {
     // yt-dlp couldn't handle it — return unknown so frontend can offer fallback
     return {

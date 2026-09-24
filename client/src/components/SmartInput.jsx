@@ -1,3 +1,5 @@
+import PlatformHelp from './PlatformHelp';
+import { apiFetch as fetch } from '../api';
 import React, { useState } from 'react';
 import AdSlot from './AdSlot';
 
@@ -80,14 +82,14 @@ export default function SmartInput({ onSwitchTab, disableAds = false }) {
             Paste any URL — we'll detect if it's a video, playlist, live stream, or streaming site and pick the right tool automatically.
           </span>
         </p>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
           <input
             type="text"
             value={url}
             onChange={e => { setUrl(e.target.value); if (probe) setProbe(null); }}
             onKeyDown={e => e.key === 'Enter' && handleProbe()}
             placeholder="YouTube、Twitch、Gimy、抖音... 任何網址都可以貼上"
-            className="flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-3 text-white placeholder-dark-300 focus:outline-none focus:border-accent transition-colors"
+            className="min-w-0 flex-1 bg-dark-700 border border-dark-500 rounded-lg px-4 py-3 text-white placeholder-dark-300 focus:outline-none focus:border-accent transition-colors"
             disabled={probing}
             autoFocus
           />
@@ -140,6 +142,7 @@ export default function SmartInput({ onSwitchTab, disableAds = false }) {
       )}
 
       {/* Welcome-state ad slot — hidden if no zone configured or disableAds=true */}
+      {!probe && !probing && <PlatformHelp />}
       {!probe && !probing && <AdSlot name="smart-welcome" disableAds={disableAds} />}
     </div>
   );
@@ -199,6 +202,9 @@ function ResultHeader({ probe, kindLabel, kindColor }) {
 // VideoCard — single video (or past live) download with format options
 // ───────────────────────────────────────────────────────────────────────────
 function VideoCard({ probe, url, onReset, onSwitchTab, pastLive = false }) {
+  const [audioOnly,setAudioOnly]=useState(false);
+  const [subtitles,setSubtitles]=useState(false);
+  const [allAudio,setAllAudio]=useState(false);
   const [info, setInfo] = useState(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -238,7 +244,7 @@ function VideoCard({ probe, url, onReset, onSwitchTab, pastLive = false }) {
       const res = await fetch('/api/download/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, format }),
+        body: JSON.stringify({url,format:audioOnly||allAudio?null:format,type:audioOnly?'audio':'video',subtitles,allAudio:!audioOnly&&allAudio}),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -253,6 +259,11 @@ function VideoCard({ probe, url, onReset, onSwitchTab, pastLive = false }) {
 
   return (
     <div className="bg-dark-800 rounded-xl p-6 border border-dark-600 animate-slide-in">
+      <div className="flex flex-wrap gap-4 text-sm mb-4">
+        <label><input type="checkbox" checked={audioOnly} onChange={e=>setAudioOnly(e.target.checked)} /> 僅音訊 M4A</label>
+        <label><input type="checkbox" checked={subtitles} onChange={e=>setSubtitles(e.target.checked)} /> 中文字幕／英文字幕（來源提供時）</label>
+        <label><input type="checkbox" checked={allAudio} disabled={audioOnly} onChange={e=>setAllAudio(e.target.checked)} /> 保留全部音軌 MKV</label>
+      </div>
       <ResultHeader
         probe={probe}
         kindLabel={pastLive ? '📼 已結束直播 (VOD)' : '📹 單一影片 Video'}
@@ -774,7 +785,7 @@ function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
         // Pre-select all found videos and default each to its best quality.
         setSelected(new Set(vids.map(v => v.id)));
         const q = {};
-        for (const v of vids) if (v.qualities?.length) q[v.id] = v.qualities[0].url;
+        for (const v of vids) if (v.qualities?.length) q[v.id] = v.qualities[0].resourceId;
         setQuality(q);
       })
       .catch(e => { if (!cancelled) setError(e.message); })
@@ -803,24 +814,10 @@ function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
       for (const v of picks) {
         const baseName = (v.title || pageTitle || 'video').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
         const filename = `${baseName}.mp4`;
-        if (v.type === 'hls') {
-          await fetch('/api/download/m3u8', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ m3u8Url: v.url, headers: v.headers, title: v.title, filename }),
-          });
-        } else if (v.type === 'mp4') {
-          const dlUrl = quality[v.id] || v.url;
-          await fetch('/api/download/aria2', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: dlUrl, headers: v.headers, filename }),
-          });
-        } else {
-          // DASH or other — let yt-dlp try the manifest URL directly.
-          await fetch('/api/download/start', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: v.url }),
-          });
-        }
+        await fetch('/api/download/resource', {
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({resourceId:quality[v.id]||v.resourceId})
+        });
       }
       onReset();
       if (onSwitchTab) onSwitchTab('download');
@@ -837,7 +834,7 @@ function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
         <span className="px-2 py-1 rounded-full text-xs bg-teal-600/20 text-teal-300">🔍 網頁影片偵測</span>
         <div className="basis-full">
           <h3 className="font-semibold">{pageTitle || '掃描網頁中的影片'}</h3>
-          <p className="text-xs text-dark-300 mt-0.5">自動偵測此網頁（含內嵌播放器 / iframe）中的影片</p>
+          <p className="text-xs text-dark-300 mt-0.5">自動列出已觀察到的影音；需要互動或登入的內容請使用擴充</p>
         </div>
       </div>
 
@@ -888,13 +885,13 @@ function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
                     <p className="text-sm truncate" title={v.title}>{v.title}</p>
                     {v.qualities?.length > 0 && (
                       <select
-                        value={quality[v.id] || v.qualities[0].url}
+                        value={quality[v.id] || v.qualities[0].resourceId}
                         onChange={e => { e.stopPropagation(); setQuality(q => ({ ...q, [v.id]: e.target.value })); }}
                         onClick={e => e.stopPropagation()}
                         className="mt-1 bg-dark-600 border border-dark-500 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-accent"
                       >
                         {v.qualities.map((q, i) => (
-                          <option key={i} value={q.url}>{q.label}</option>
+                          <option key={i} value={q.resourceId}>{q.label}</option>
                         ))}
                       </select>
                     )}
@@ -912,7 +909,7 @@ function WebpageScanCard({ probe, url, onReset, onSwitchTab }) {
             {queueing ? '加入下載中...' : `下載所選 · Download — ${selected.size} 部影片`}
           </button>
           <p className="text-xs text-dark-400 mt-2 text-center">
-            HLS 串流會多線程分段下載後合併；MP4 以多連線直接下載。
+            已觀察到的媒體會交給下載引擎，完成後檢查檔案與音軌。
           </p>
         </>
       )}

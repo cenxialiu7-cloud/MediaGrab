@@ -6,10 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:9800',
+      '/api': {target:'http://127.0.0.1:9800',changeOrigin:true},
       '/ws': {
         target: 'ws://localhost:9800',
-        ws: true
+        ws: true,changeOrigin:true
       }
     }
   },
