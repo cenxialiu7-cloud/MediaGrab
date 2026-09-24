@@ -20,8 +20,12 @@ const server = http.createServer((req, res) => {
     assert.equal(req.method, 'POST');
     assert.equal(req.headers['x-mediagrab-token'], token);
     res.statusCode = mode === 'reject' ? 403 : 200;
+    if (mode === 'accept') {
+      res.setHeader('Connection', 'close');
+      // Match real server process exit: close ALL persistent status sockets.
+      res.once('finish', () => { server.close(); server.closeAllConnections(); });
+    }
     res.end('{}');
-    if (mode === 'accept') { server.close(); server.closeIdleConnections(); }
   } else { res.writeHead(404); res.end(); }
 });
 const run = () => new Promise((resolve, reject) => {
