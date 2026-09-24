@@ -62,9 +62,6 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; Optional: add Defender exclusion so yt-dlp.exe isn't blocked (silently fails if PowerShell or AV blocks it)
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}' -ErrorAction SilentlyContinue"""; Flags: runhidden skipifsilent
-
 ; Auto-launch after install
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now (立即啟動)"; Flags: nowait postinstall skipifsilent
 
@@ -72,14 +69,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now (立即
 ; Clean up logs/pid created at runtime
 Type: filesandordirs; Name: "{localappdata}\MediaGrab"
 
-[Code]
-// Kill any running MediaGrab.exe / node.exe spawned by it before uninstall
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  ResultCode: Integer;
-begin
-  if CurUninstallStep = usUninstall then begin
-    Exec('taskkill.exe', '/F /IM MediaGrab.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Exec('taskkill.exe', '/F /IM node.exe',      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-end;
+[UninstallRun]
+; Ask only this user's authenticated MediaGrab server to exit. Never kill all Node processes.
+Filename: "{app}\MediaGrab.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "StopMediaGrab"

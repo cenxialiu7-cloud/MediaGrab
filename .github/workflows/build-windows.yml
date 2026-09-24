@@ -198,6 +198,9 @@ jobs:
           go build -ldflags="-H windowsgui -s -w" -trimpath -o ..\payload\MediaGrab.exe main.go
           (Get-Item ..\payload\MediaGrab.exe).Length / 1KB
 
+      - name: Verify authenticated launcher shutdown
+        run: node scripts/check-windows-launcher.mjs packaging-windows/payload/MediaGrab.exe
+
       # ────────────────────────────────────────────────────────────────────
       # 7. Verify payload sizes before compiling installer
       # ────────────────────────────────────────────────────────────────────

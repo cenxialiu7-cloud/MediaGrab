@@ -29,6 +29,13 @@ func main() {
 	binDir := filepath.Join(appDir, "bin")
 	browsersDir := filepath.Join(appDir, "ms-playwright")
 
+	if len(os.Args) == 2 && os.Args[1] == "--quit" {
+		if err := quitServer(); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
 	userData := filepath.Join(os.Getenv("LOCALAPPDATA"), "MediaGrab")
 	_ = os.MkdirAll(userData, 0755)
 	logPath := filepath.Join(userData, "server.log")
@@ -44,21 +51,9 @@ func main() {
 		}
 		// Older/unknown instance holds the port (e.g. you just updated) — ask it
 		// to quit, then wait for the port to free so this version takes over.
-        home, _ := os.UserHomeDir()
-        token, _ := os.ReadFile(filepath.Join(home, ".mediagrab", "capture-token"))
-        if len(token) > 0 && runningVersion() != "" {
-            req, _ := http.NewRequest("POST", "http://localhost:"+port+"/api/quit", nil)
-            req.Header.Set("X-MediaGrab-Token", strings.TrimSpace(string(token)))
-            client := http.Client{Timeout: 3*time.Second}
-            if resp, err := client.Do(req); err == nil { resp.Body.Close() }
-        }
-		for i := 0; i < 30; i++ {
-			if !pingServer() {
-				break
-			}
-			time.Sleep(300 * time.Millisecond)
+		if err := quitServer(); err != nil {
+			fatal("MediaGrab port is still busy. Quit the existing app before starting this version.")
 		}
-        if pingServer() { fatal("MediaGrab port is still busy. Quit the existing app before starting this version.") }
 
 	}
 
@@ -104,6 +99,45 @@ func main() {
 	// Server didn't come up — open browser anyway and the user-data folder
 	openBrowser("http://localhost:" + port)
 	exec.Command("explorer", userData).Start()
+}
+
+// Quit uses the per-user native token; unrelated processes are never terminated.
+func quitServer() error {
+	if !pingServer() {
+		return nil
+	}
+	if runningVersion() == "" {
+		return fmt.Errorf("port is not a MediaGrab server")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	token, err := os.ReadFile(filepath.Join(home, ".mediagrab", "capture-token"))
+	if err != nil || strings.TrimSpace(string(token)) == "" {
+		return fmt.Errorf("local token unavailable")
+	}
+	req, err := http.NewRequest("POST", "http://localhost:"+port+"/api/quit", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-MediaGrab-Token", strings.TrimSpace(string(token)))
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("authenticated quit rejected")
+	}
+	for i := 0; i < 30; i++ {
+		if !pingServer() {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf("MediaGrab did not stop")
 }
 
 func pingServer() bool {

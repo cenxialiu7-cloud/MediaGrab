@@ -11,6 +11,7 @@
 - 不再把零散 TS 片段合成「完整影片」。移除自動複製 1.5 GB MSE buffer 與未驗證的逐軌匯出；沒有完整串流時說明限制。此版**沒有提供通用螢幕錄影或 DRM 繞過**。
 - 支援音訊 M4A、來源有提供時的中英文字幕、多音軌 MKV 選項。課程按實際播放器判斷，沒有「所有課程都可下載」承諾。
 - 固定 Node 24.21.0、yt-dlp 2026.08.19。Mac FFmpeg/ffprobe 7.1.1、Windows BtbN FFmpeg 8.1.3；`packaging/engines.lock.json` 保存固定 URL 與 SHA-256。更新器預設關閉，驗證 hash 與執行後才替換，保留上一版。
+- Windows 安裝器不再自動加入 Defender 排除項目；解除安裝只透過驗證 token 關閉 MediaGrab，不再終止所有 node.exe。
 - 使用 npm ci；新增版本、媒體回歸、瀏覽器 smoke、runtime inventory 與 CycloneDX SBOM 產生步驟。移除下載對 aria2 daemon 的依賴，legacy `/aria2` 路由交由共用下載器。
 
 ## 驗證範圍
