@@ -127,6 +127,7 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+          MEDIAGRAB_REQUIRE_MEDIA_TESTS: '1'
         run: |
           npm run check:version
           if ($LASTEXITCODE -ne 0) { throw "Version mismatch" }

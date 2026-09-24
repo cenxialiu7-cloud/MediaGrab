@@ -98,10 +98,10 @@ jobs:
       - name: Install root deps
         run: npm ci --no-audit --no-fund
 
-      - name: Validate source versions and tests
+      - name: Validate source versions
         env:
           RELEASE_VERSION: ${{ needs.setup.outputs.version }}
-        run: npm run check:version && npm test
+        run: npm run check:version
 
       - name: Build React client
         working-directory: client
@@ -216,6 +216,8 @@ jobs:
           "$RES/bin/ffmpeg" -version | head -1
 
       - name: Download ffprobe and verify media runtime
+        env:
+          MEDIAGRAB_REQUIRE_MEDIA_TESTS: '1'
         run: |
           RES="packaging/MediaGrab.app/Contents/Resources"
           node scripts/download-asset.mjs "ffprobe-darwin-${{ matrix.arch }}" ffprobe.zip

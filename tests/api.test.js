@@ -152,6 +152,7 @@ test("WebSocket accepts only local origin plus session cookie", async () => {
 });
 test("production page blocks third party scripts and frames", async () => {
   const r = await call("/");
+  assert.equal(r.status, 200, "Build the production client before testing its CSP");
   assert.match(r.headers.get("content-security-policy"), /script-src 'self'/);
   assert.match(r.headers.get("content-security-policy"), /frame-src 'none'/);
 });

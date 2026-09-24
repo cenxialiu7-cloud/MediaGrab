@@ -162,6 +162,8 @@ const hasMediaTools = (() => {
     return false;
   }
 })();
+if (process.env.MEDIAGRAB_REQUIRE_MEDIA_TESTS === "1")
+  assert.ok(hasMediaTools, "Release CI requires working ffmpeg, ffprobe and yt-dlp");
 test(
   "media integration: direct MP4, full HLS, missing HLS fragment and protected DASH",
   { skip: !hasMediaTools, timeout: 120000 },
@@ -312,6 +314,8 @@ test(
         path.basename(new URL(req.url, "http://localhost").pathname),
       );
       if (!fs.existsSync(file)) {
+        if (!req.url.includes("absent"))
+          console.error("Missing synthetic media fixture", { request: req.url, files: fs.readdirSync(media), manifest: fs.readFileSync(path.join(media, "clear.mpd"), "utf8") });
         res.writeHead(404);
         res.end();
         return;
