@@ -331,8 +331,24 @@ jobs:
           retention-days: 30
 
       # A tag may create/update a draft, but publishing requires BOTH platforms.
-      - name: Attach to draft GitHub Release (only on tag push)
+      - name: Keep published releases immutable on reruns
+        id: release_state
         if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                ...context.repo, tag: context.ref.replace('refs/tags/', '')
+              });
+              return data.draft;
+            } catch (error) {
+              if (error.status === 404) return true;
+              throw error;
+            }
+
+      - name: Attach to draft GitHub Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/v') && steps.release_state.outputs.result == 'true'
         uses: softprops/action-gh-release@v2
         with:
           draft: true
