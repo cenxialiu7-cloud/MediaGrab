@@ -149,7 +149,7 @@ function ff(args) {
   execFileSync(
     "ffmpeg",
     ["-hide_banner", "-loglevel", "error", "-y", ...args],
-    { stdio: "pipe" },
+    { stdio: "pipe", cwd: media },
   );
 }
 const hasMediaTools = (() => {
@@ -215,8 +215,12 @@ test(
       "1",
       "-f",
       "dash",
-      path.join(media, "clear.mpd"),
+      // FFmpeg DASH resolves sidecar paths relative to the manifest. Use a
+      // basename in the fixture cwd so Windows backslashes cannot lose its dir.
+      "clear.mpd",
     ]);
+    for (const name of ["init-stream0.m4s", "init-stream1.m4s"])
+      assert.ok(fs.existsSync(path.join(media, name)), "Missing DASH fixture: " + name);
     ff([
       "-i",
       path.join(media, "source.mp4"),
